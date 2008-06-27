@@ -72,6 +72,9 @@
 ;   27 Jun 2008:                                                      *
 ;       Fixed incorrect variable being used as src2OnRate when        *
 ;       Updating position.                                            *
+;       Target position made 16 bits, speed still 8 bits but          *
+;       multiplied by 16 to update target position.                   *
+;       Code protection turned on, just in case ...                   *
 ;                                                                     *
 ;**********************************************************************
 
@@ -82,12 +85,12 @@
 
 #include <p16f630.inc>
 
-    __CONFIG   _CPD_OFF & _CP_OFF & _BODEN & _MCLRE_ON & _PWRTE_ON & _WDT_OFF & _INTRC_OSC_NOCLKOUT
+    __CONFIG   _CPD_OFF & _CP & _BODEN & _MCLRE_ON & _PWRTE_ON & _WDT_OFF & _INTRC_OSC_NOCLKOUT
 
 ; '__CONFIG' directive is used to embed configuration data within .asm file.
 ; The lables following the directive are located in the respective .inc file.
 ; See respective data sheet for additional information on configuration word.
-; Selection is: Data Code Protection - off, Code Protection - off,
+; Selection is: Data Code Protection - off, Code Protection - on,
 ;               Brown Out Detection - on, RA3/!MCLR - !MCLR,
 ;               Power-up Timer - on, Watchdog Timer - off,
 ;               Oscillator - Internal RC oscillator (4MHz), no clock output
@@ -155,7 +158,6 @@ MINSPEED    EQU    1        ; Value for minimum speed
 MIDSPEED    EQU    127      ; Value for middle speed
 MAXSPEED    EQU    255      ; Value for maximum speed
 
-REMOTECMND  EQU    '!'      ; Command character to apply remote input value
 RESETCMND   EQU    '#'      ; Command character to reset settings from EEPROM
 STORECMND   EQU    '@'      ; Command character to store settings to EEPROM
 COMMANDBASE EQU    'A'      ; Command character for first setting value
@@ -166,7 +168,6 @@ COMMANDBASE EQU    'A'      ; Command character for first setting value
 #define  STOREDIND    sysFlags,0
 #define  LOADEDIND    sysFlags,1
 #define  RXDATAIND    sysFlags,2
-#define  REMOTEIND    sysFlags,3
 
 
 ;**********************************************************************
@@ -185,7 +186,6 @@ cycleState                  ; Interrupt routine pulse cycle state
 sysFlags                    ; System status flags
 
 inpVal                      ; Servo control inputs value
-remoteVal                   ; Remote control servo inputs value
 
 temp1                       ; General purpose temporary register
 temp2                       ; General purpose temporary register
@@ -194,10 +194,14 @@ temp3                       ; General purpose temporary register
 numHundreds                 ; First ASCII digit of number
 numTens                     ; Second ASCII digit of number
 
-srv1Now                     ; Servo 1 target position
-srv2Now                     ; Servo 2 target position
-srv3Now                     ; Servo 3 target position
-srv4Now                     ; Servo 4 target position
+srv1NowH                    ; Servo 1 target position high byte
+srv1NowL                    ; Servo 1 target position low byte
+srv2NowH                    ; Servo 2 target position high byte
+srv2NowL                    ; Servo 2 target position low byte
+srv3NowH                    ; Servo 3 target position high byte
+srv3NowL                    ; Servo 3 target position low byte
+srv4NowH                    ; Servo 4 target position high byte
+srv4NowL                    ; Servo 4 target position low byte
 
 srv1State                   ; Servo 1 movement state
 srv2State                   ; Servo 2 movement state
@@ -443,7 +447,7 @@ srv1Start
     goto    startpulse
 
 srv1Run
-    movf    srv1Now,W       ; Set duration for position part of pulse
+    movf    srv1NowH,W       ; Set duration for position part of pulse
     goto    runpulse
 
 srv2Start
@@ -452,7 +456,7 @@ srv2Start
     goto    startpulse
 
 srv2Run
-    movf    srv2Now,W       ; Set duration for position part of pulse
+    movf    srv2NowH,W       ; Set duration for position part of pulse
     goto    runpulse
 
 srv3Start
@@ -461,7 +465,7 @@ srv3Start
     goto    startpulse
 
 srv3Run
-    movf    srv3Now,W       ; Set duration for position part of pulse
+    movf    srv3NowH,W       ; Set duration for position part of pulse
     goto    runpulse
 
 srv4Start
@@ -470,7 +474,7 @@ srv4Start
     goto    startpulse
 
 srv4Run
-    movf    srv4Now,W       ; Set duration for position part of pulse
+    movf    srv4NowH,W       ; Set duration for position part of pulse
     goto    runpulse
 
 cycleEnd
@@ -541,8 +545,6 @@ main
     call    updateAllServos ; Update servo target positions
 
     movf    INPORT,W        ; Read physical input port ...
-    btfsc   REMOTEIND       ; ... if got remote control inputs value ...
-    andwf   remoteVal,W     ; ...  AND out received inputs value ...
     movwf   inpVal          ; ... and save input values
                             ;     (may be overridden by serial link command)
 
@@ -719,8 +721,9 @@ srv1SetOff3Position
     movwf   srv1Off3        ; ... as servo setting
 
 received1OffPosition
-    movwf   srv1Now         ; Set target position as received setting value
-    bsf     SRV1IN          ; Remote input off, inactive (set bit)
+    movwf   srv1NowH        ; Set target position as received setting value
+    clrf    srv1NowL
+    bsf     SRV1IN          ; Servo input off, inactive (set bit)
     clrf    srv1State       ; Set movement state as Off movement complete
     goto    receivedSetting
 
@@ -750,8 +753,9 @@ srv1SetOn3Position
     movwf   srv1On3         ; ... as servo setting
 
 received1OnPosition
-    movwf   srv1Now         ; Set target position as received setting value
-    bcf     SRV1IN          ; Remote input on, active (clear bit)
+    movwf   srv1NowH        ; Set target position as received setting value
+    clrf    srv1NowL
+    bcf     SRV1IN          ; Servo input on, active (clear bit)
     clrf    srv1State       ; Set movement state as On movement complete
     bsf     srv1State,SRVONSTBIT
     goto    receivedSetting
@@ -792,8 +796,9 @@ srv2SetOff3Position
     movwf   srv2Off3        ; ... as servo settings
 
 received2OffPosition
-    movwf   srv2Now         ; Set target position as received setting value
-    bsf     SRV2IN          ; Remote input off, inactive (set bit)
+    movwf   srv2NowH        ; Set target position as received setting value
+    clrf    srv2NowL
+    bsf     SRV2IN          ; Servo input off, inactive (set bit)
     clrf    srv2State       ; Set movement state as Off movement complete
     goto    receivedSetting
 
@@ -823,8 +828,9 @@ srv2SetOn3Position
     movwf   srv2On3         ; ... as servo setting
 
 received2OnPosition
-    movwf   srv2Now         ; Set target position as received setting value
-    bcf     SRV2IN          ; Remote input on, active (clear bit)
+    movwf   srv2NowH        ; Set target position as received setting value
+    clrf    srv2NowL
+    bcf     SRV2IN          ; Servo input on, active (clear bit)
     clrf    srv2State       ; Set movement state as On movement complete
     bsf     srv2State,SRVONSTBIT
     goto    receivedSetting
@@ -865,8 +871,9 @@ srv3SetOff3Position
     movwf   srv3Off3        ; ... as servo setting
 
 received3OffPosition
-    movwf   srv3Now         ; Set target position as received setting value
-    bsf     SRV3IN          ; Remote input off, inactive (set bit)
+    movwf   srv3NowH        ; Set target position as received setting value
+    clrf    srv3NowL
+    bsf     SRV3IN          ; Servo input off, inactive (set bit)
     clrf    srv3State       ; Set movement state as Off movement complete
     goto    receivedSetting
 
@@ -896,8 +903,9 @@ srv3SetOn3Position
     movwf   srv3On3         ; ... as servo setting
 
 received3OnPosition
-    movwf   srv3Now         ; Set target position as received setting value
-    bcf     SRV3IN          ; Remote input on, active (clear bit)
+    movwf   srv3NowH        ; Set target position as received setting value
+    clrf    srv3NowL
+    bcf     SRV3IN          ; Servo input on, active (clear bit)
     clrf    srv3State       ; Set movement state as On movement complete
     bsf     srv3State,SRVONSTBIT
     goto    receivedSetting
@@ -938,8 +946,9 @@ srv4SetOff3Position
     movwf   srv4Off3        ; ... as servo setting
 
 received4OffPosition
-    movwf   srv4Now         ; Set target position as received setting value
-    bsf     SRV4IN          ; Remote input off, inactive (set bit)
+    movwf   srv4NowH        ; Set target position as received setting value
+    clrf    srv4NowL
+    bsf     SRV4IN          ; Servo input off, inactive (set bit)
     clrf    srv4State       ; Set movement state as Off movement complete
     goto    receivedSetting
 
@@ -969,8 +978,9 @@ srv4SetOn3Position
     movwf   srv4On3         ; ... as servo setting
 
 received4OnPosition
-    movwf   srv4Now         ; Set target position as received setting value
-    bcf     SRV4IN          ; Remote input on, active (clear bit)
+    movwf   srv4NowH        ; Set target position as received setting value
+    clrf    srv4NowL
+    bcf     SRV4IN          ; Servo input on, active (clear bit)
     clrf    srv4State       ; Set movement state as On movement complete
     bsf     srv1State,SRVONSTBIT
     goto    receivedSetting
@@ -990,17 +1000,6 @@ receivedSetting
     goto    syncSerRx       ; Loop looking for possible serial data
 
 receivedCommand
-    movf    temp2,W         ; Test if command ...
-    xorlw   REMOTECMND      ; ... is remote control inputs value ...
-    btfss   STATUS,Z        ; ... if so skip ...
-    goto    storeSettings   ; ... otherwise test for reset or store command
-
-    movf    temp3,W         ; Store received value ...
-    movwf   remoteVal       ; ... remote control servo inputs value
-    bsf     REMOTEIND       ; Set remote control servo inputs value indicator
-    goto    syncSerRx
-
-storeSettings
     movf    temp2,W         ; Test if command ...
     xorlw   STORECMND       ; ... is to store settings ...
     btfss   STATUS,Z        ; ... if so skip ...
@@ -1095,14 +1094,10 @@ loadSetting
     clrf    sysFlags        ; Clear: servo settings stored indicator,
                             ;        servo settings loaded indicator,
                             ;        data byte received indicator,
-                            ;        remote settings received indicator
     bsf     STOREDIND       ; Set servo settings stored indicator
     bsf     LOADEDIND       ; Set servo settings loaded indicator
 
     ; Initialise servo target positions
-    clrf    remoteVal       ; Clear remote servo inputs value ...
-    comf    remoteVal,F     ; ... then complement because used as AND mask
-
     movf    INPORT,W        ; Read physical input port ...
     movwf   inpVal          ; ... and save input values from physical port
 
@@ -1111,28 +1106,32 @@ loadSetting
     movf    srv1Off,W       ; ... else set target as off position
     btfss   SRV1IN          ; Skip if input bit set, input off (inactive)
     movf    srv1On,W        ; ... else set target as on position
-    movwf   srv1Now
+    movwf   srv1NowH
+    clrf    srv1NowL
 
     ; Servo 2
     btfsc   SRV2IN          ; Skip if input bit clear, input on (active) ...
     movf    srv2Off,W       ; ... else set target as off position
     btfss   SRV2IN          ; Skip if input bit set, input off (inactive)
     movf    srv2On,W        ; ... else set target as on position
-    movwf   srv2Now
+    movwf   srv2NowH
+    clrf    srv2NowL
 
     ; Servo 3
     btfsc   SRV3IN          ; Skip if input bit clear, input on (active) ...
     movf    srv3Off,W       ; ... else set target as off position
     btfss   SRV3IN          ; Skip if input bit set, input off (inactive)
     movf    srv3On,W        ; ... else set target as on position
-    movwf   srv3Now
+    movwf   srv3NowH
+    clrf    srv3NowL
 
     ; Servo 4
     btfsc   SRV4IN          ; Skip if input bit clear, input on (active) ...
     movf    srv4Off,W       ; ... else set target as off position
     btfss   SRV4IN          ; Skip if input bit set, input off (inactive)
     movf    srv4On,W        ; ... else set target as on position
-    movwf   srv4Now
+    movwf   srv4NowH
+    clrf    srv4NowL
 
     ; Initalise servo movement states
     clrf    srv1State
@@ -1317,48 +1316,48 @@ updateAllServos
 
 updateSrv1
     ServoOffState  srv1State
-    ServoUpdate    srv1State, srv1Off, srv1OffRate, srv1Now
+    ServoUpdate    srv1State, srv1Off, srv1OffRate, srv1NowH
     goto    updateSrv2
 
 updateSrv1On
     ServoOnState   srv1State
-    ServoUpdate    srv1State, srv1Off, srv1OnRate, srv1Now
+    ServoUpdate    srv1State, srv1Off, srv1OnRate, srv1NowH
 
 updateSrv2
     btfss   SRV2IN          ; Skip if input bit set, input off (inactive) ...
     goto    updateSrv2On    ; ... else perform servo on update
 
     ServoOffState  srv2State
-    ServoUpdate    srv2State, srv2Off, srv2OffRate, srv2Now
+    ServoUpdate    srv2State, srv2Off, srv2OffRate, srv2NowH
     goto    updateSrv3
 
 updateSrv2On
     ServoOnState   srv2State
-    ServoUpdate    srv2State, srv2Off, srv2OnRate, srv2Now
+    ServoUpdate    srv2State, srv2Off, srv2OnRate, srv2NowH
 
 updateSrv3
     btfss   SRV3IN          ; Skip if input bit set, input off (inactive) ...
     goto    updateSrv3On    ; ... else perform servo on update
 
     ServoOffState  srv3State
-    ServoUpdate    srv3State, srv3Off, srv3OffRate, srv3Now
+    ServoUpdate    srv3State, srv3Off, srv3OffRate, srv3NowH
     goto    updateSrv4
 
 updateSrv3On
     ServoOnState   srv3State
-    ServoUpdate    srv3State, srv3Off, srv3OnRate, srv3Now
+    ServoUpdate    srv3State, srv3Off, srv3OnRate, srv3NowH
 
 updateSrv4
     btfss   SRV4IN          ; Skip if input bit set, input off (inactive) ...
     goto    updateSrv4On    ; ... else perform servo on update
 
     ServoOffState  srv4State
-    ServoUpdate    srv4State, srv4Off, srv4OffRate, srv4Now
+    ServoUpdate    srv4State, srv4Off, srv4OffRate, srv4NowH
     return
 
 updateSrv4On
     ServoOnState   srv4State
-    ServoUpdate    srv4State, srv4Off, srv4OnRate, srv4Now
+    ServoUpdate    srv4State, srv4Off, srv4OnRate, srv4NowH
     return
 
 
@@ -1368,18 +1367,40 @@ updateSrv4On
 ;     STATUS,Z set when target and setting positions match            *
 ;**********************************************************************
 updateServo
+    movf    temp2,F         ; Test speed ...
+    btfsc   STATUS,Z        ; ... replacing zero with ...
+    movlw   MAXSPEED        ; ... maximum speed ...
+
     movf    INDF,W          ; Test target position ...
-    subwf   temp1,W         ; ... against position setting
+    subwf   temp1,W         ; ... against position setting (result used later)
+
+    ; Multiply 8 bit speed by 16 to give 16 bit value
+    swapf   temp2,F         ; Swap nibbles, times 16 but mixed up
+    movlw   0x0F            ; Isolate high byte ...
+    andwf   temp2,W         ; ... nibble ...
+    movwf   temp3           ; ... and save
+    movlw   0xF0            ; Isolate low byte ...
+    andwf   temp2,W         ; nibble
+
     btfss   STATUS,C        ; Skip if target is less than position setting
     goto    decrementServo
 
-    movf    temp2,W         ; Add speed ...
-    btfsc   STATUS,Z        ; ... replacing zero with ...
-    movlw   MAXSPEED        ; ... maximum speed ...
-    addwf   INDF,F          ; ... to target position
+    ; Add speed to target position
+    incf    FSR,F           ; Target position low byte
+
+    addwf   INDF,F          ; Add speed low to target positon low
+
+    decf    FSR,F           ; Target positon high byte
+
+    btfsc   STATUS,C        ; Check no overflow from low byte addition ...
+    incf    temp3,F         ; ... else adjust speed high byte
+
+    movf    temp3,W         ; Get speed high byte
+
+    addwf   INDF,F          ; Add speed high to target position high
 
     btfsc   STATUS,C        ; Skip if no overflow ...
-    goto    srvFullSetting  ; ... else limit to position setting
+    goto    srvFullSetting  ; ... else limit target to position setting
 
     movf    temp1,W         ; Subtract position setting ...
     subwf   INDF,W          ; ... from target position
@@ -1389,10 +1410,19 @@ updateServo
     goto    servoUpdated
 
 decrementServo
-    movf    temp2,W         ; Subtract speed ...
-    btfsc   STATUS,Z        ; ... replacing zero with ...
-    movlw   MAXSPEED        ; ... maximum speed ...
-    subwf   INDF,F          ; ... from target position
+    ; Subtract speed from target position
+    incf    FSR,F           ; Target position low byte
+
+    subwf   INDF,F          ; Subtract speed low from target positon low
+
+    decf    FSR,F           ; Target positon high byte
+
+    btfss   STATUS,C        ; Check no overflow from low byte subtraction ...
+    incf    temp3,F         ; ... else adjust speed high byte
+
+    movf    temp3,W         ; Get speed high byte
+
+    subwf   INDF,F          ; Subtract speed high from target position high
 
     btfss   STATUS,C        ; Skip if no overflow ...
     goto    srvFullSetting  ; ... else limit to position setting
@@ -1406,6 +1436,9 @@ decrementServo
 srvFullSetting
     movf    temp1,W         ; Set position setting ...
     movwf   INDF            ; ... as target position
+    incf    FSR,F           ; Target position low byte
+    clrf    INDF
+    decf    FSR,F           ; Target positon high byte
 
 servoUpdated
     movf    INDF,W          ; Compare target position ...
