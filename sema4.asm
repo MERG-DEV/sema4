@@ -69,6 +69,10 @@
 ;   26 Jun 2008:                                                      *
 ;       Replaced RS232i and numValue with temp3.                      *
 ;                                                                     *
+;   27 Jun 2008:                                                      *
+;       Fixed incorrect variable being used as src2OnRate when        *
+;       Updating position.                                            *
+;                                                                     *
 ;**********************************************************************
 
 
@@ -1330,7 +1334,7 @@ updateSrv2
 
 updateSrv2On
     ServoOnState   srv2State
-    ServoUpdate    srv2State, srv2Off, srv2On, srv2Now
+    ServoUpdate    srv2State, srv2Off, srv2OnRate, srv2Now
 
 updateSrv3
     btfss   SRV3IN          ; Skip if input bit set, input off (inactive) ...
