@@ -121,12 +121,14 @@ OUTPORT     EQU    PORTC
 PORTCDIR    EQU    B'00000000' ; All port bits outputs
 
 ; Serial RX input port bit definition
-#define  SERRXIN    INPORT,2
+#define  SERRXIN   INPORT,2
 
 RS232BITS   EQU    B'01111111' ; RS232 8 data bits (right shifted into carry)
 ; RS232 delay in instruction cycles for 9K6 baud at 1MHz clock
 RXBITTIME   EQU    104         ; Delay count for 1 serial bit
 RXSTARTTIME EQU    156         ; Delay count for 1.5 serial bits
+
+TIMEFREEZE  EQU    128         ; Number of cycles for setting mode timeout
 
 SRVOFFST    EQU    7
 SRVONST     EQU    (B'00000001000' | SRVOFFST)
@@ -134,16 +136,16 @@ SRVONSTBIT  EQU    3
 SRVSTMASK   EQU    B'00000000111'
 
 ; Servo control bit definitions (active low)
-#define  SRV1IN     inpVal,0
-#define  SRV2IN     inpVal,1
-#define  SRV3IN     inpVal,4
-#define  SRV4IN     inpVal,5
+#define  SRV1IN    inpVal,0
+#define  SRV2IN    inpVal,1
+#define  SRV3IN    inpVal,4
+#define  SRV4IN    inpVal,5
 
 ; Servo control output port bit definitions (active high)
-#define  SRV1OUT    OUTPORT,0
-#define  SRV2OUT    OUTPORT,1
-#define  SRV3OUT    OUTPORT,2
-#define  SRV4OUT    OUTPORT,3
+#define  SRV1OUT   OUTPORT,0
+#define  SRV2OUT   OUTPORT,1
+#define  SRV3OUT   OUTPORT,2
+#define  SRV4OUT   OUTPORT,3
 
 ; Interrupt interval for servo pulse cycle start, 20.096mSec (7,812.5Hz / 157)
 CYCLEINT    EQU    (255 - 157)
@@ -159,6 +161,7 @@ MIDSPEED    EQU    127      ; Value for middle speed
 MAXSPEED    EQU    255      ; Value for maximum speed
 
 RESETCMND   EQU    '#'      ; Command character to reset settings from EEPROM
+RUNCMND     EQU    '$'      ; Command character to exit setting mode
 STORECMND   EQU    '@'      ; Command character to store settings to EEPROM
 COMMANDBASE EQU    'A'      ; Command character for first setting value
 
@@ -168,6 +171,10 @@ COMMANDBASE EQU    'A'      ; Command character for first setting value
 #define  STOREDIND    sysFlags,0
 #define  LOADEDIND    sysFlags,1
 #define  RXDATAIND    sysFlags,2
+
+ASCIIBIT    EQU    7        ; Bit should be clear in any ASCII character
+DIGITMASK   EQU    0xF0     ; Mask out lower nibble of ASCII digit character
+DIGITTEST   EQU    '0'      ; Test pattern for ASCII digit after applying mask
 
 
 ;**********************************************************************
@@ -186,6 +193,8 @@ cycleState                  ; Interrupt routine pulse cycle state
 sysFlags                    ; System status flags
 
 inpVal                      ; Servo control inputs value
+
+freezeTime                  ; Ignore inputs for setting mode timeout
 
 temp1                       ; General purpose temporary register
 temp2                       ; General purpose temporary register
@@ -266,16 +275,16 @@ srv4OnRate                  ; On speed
 	ORG     0x2100  ; EEPROM data area
 
 ; Servo 1
-    DE      MIDPOINT - 64   ; Off position
-    DE      MIDPOINT - 32   ; Off position first bounce
-    DE      MIDPOINT - 48   ; Off position second bounce
-    DE      MIDPOINT - 56   ; Off position third bounce
-    DE      MIDPOINT + 64   ; On position
-    DE      MIDPOINT + 32   ; On position first bounce
-    DE      MIDPOINT + 48   ; On position second bounce
-    DE      MIDPOINT + 56   ; On position third bounce
-    DE      MINSPEED
-    DE      MINSPEED
+    DE      MIDPOINT        ; Off position
+    DE      MIDPOINT        ; Off position first bounce
+    DE      MIDPOINT        ; Off position second bounce
+    DE      MIDPOINT        ; Off position third bounce
+    DE      MIDPOINT        ; On position
+    DE      MIDPOINT        ; On position first bounce
+    DE      MIDPOINT        ; On position second bounce
+    DE      MIDPOINT        ; On position third bounce
+    DE      MIDSPEED
+    DE      MIDSPEED
 
 ; Servo 2
     DE      MIDPOINT        ; Off position
@@ -286,8 +295,8 @@ srv4OnRate                  ; On speed
     DE      MIDPOINT        ; On position first bounce
     DE      MIDPOINT        ; On position second bounce
     DE      MIDPOINT        ; On position third bounce
-    DE      MAXSPEED
-    DE      MAXSPEED
+    DE      MIDSPEED
+    DE      MIDSPEED
 
 ; Servo 3
     DE      MIDPOINT        ; Off position
@@ -298,8 +307,8 @@ srv4OnRate                  ; On speed
     DE      MIDPOINT        ; On position first bounce
     DE      MIDPOINT        ; On position second bounce
     DE      MIDPOINT        ; On position third bounce
-    DE      MAXSPEED
-    DE      MAXSPEED
+    DE      MIDSPEED
+    DE      MIDSPEED
 
 ; Servo 4
     DE      MIDPOINT        ; Off position
@@ -310,8 +319,8 @@ srv4OnRate                  ; On speed
     DE      MIDPOINT        ; On position first bounce
     DE      MIDPOINT        ; On position second bounce
     DE      MIDPOINT        ; On position third bounce
-    DE      MAXSPEED
-    DE      MAXSPEED
+    DE      MIDSPEED
+    DE      MIDSPEED
 
 
 ;**********************************************************************
@@ -544,9 +553,16 @@ main
 
     call    updateAllServos ; Update servo target positions
 
-    movf    INPORT,W        ; Read physical input port ...
-    movwf   inpVal          ; ... and save input values
+    movf    INPORT,W        ; Read physical input port
+
+    movf    freezeTime,F    ; Test position setting mode timeout
+
+    btfsc   STATUS,Z        ; Skip if timeout running, ignore inputs ...
+    movwf   inpVal          ; ... otherwise save input values
                             ;     (may be overridden by serial link command)
+
+    btfss   STATUS,Z        ; Skip if setting mode timeout not running ...
+    decf    freezeTime,F    ; ... else decrement timeout
 
     bsf     INTCON,GIE      ; Enable interrupts
 
@@ -603,11 +619,21 @@ endSerSync
     btfss   RXDATAIND       ; Skip if received a byte ...
     goto    syncSerRx       ; ... otherwise abort
 
+    btfsc   temp3,ASCIIBIT  ; Test received byte is an ASCII character ...
+    goto    syncSerRx       ; ... otherwise abort
+
     movf    temp3,W         ; Save received byte ...
     movwf   temp2           ; ... as command
 
     call    dataSerRx       ; Receive byte via serial input
     btfss   RXDATAIND       ; Skip if received a byte ...
+    goto    syncSerRx       ; ... otherwise abort
+
+    ; Check received byte is an ASCII digit
+    movlw   DIGITMASK       ; Mask out lower nibble ...
+    andwf   temp3,W         ; ... of recieved byte ...
+    xorlw   DIGITTEST       ; ... and test for ASCII digit ...
+    btfss   STATUS,Z        ; .. continue if ASCII digit received ...
     goto    syncSerRx       ; ... otherwise abort
 
     movf    temp3,W         ; Save received byte ...
@@ -617,11 +643,25 @@ endSerSync
     btfss   RXDATAIND       ; Skip if received a byte ...
     goto    syncSerRx       ; ... otherwise abort
 
+    ; Check received byte is an ASCII digit
+    movlw   DIGITMASK       ; Mask out lower nibble ...
+    andwf   temp3,W         ; ... of recieved byte ...
+    xorlw   DIGITTEST       ; ... and test for ASCII digit ...
+    btfss   STATUS,Z        ; .. continue if ASCII digit received ...
+    goto    syncSerRx       ; ... otherwise abort
+
     movf    temp3,W         ; Save received byte ...
     movwf   numTens         ; ... as tens digit of value
 
     call    dataSerRx       ; Receive byte via serial input
     btfss   RXDATAIND       ; Skip if received a byte ...
+    goto    syncSerRx       ; ... otherwise abort
+
+    ; Check received byte is an ASCII digit
+    movlw   DIGITMASK       ; Mask out lower nibble ...
+    andwf   temp3,W         ; ... of recieved byte ...
+    xorlw   DIGITTEST       ; ... and test for ASCII digit ...
+    btfss   STATUS,Z        ; .. continue if ASCII digit received ...
     goto    syncSerRx       ; ... otherwise abort
 
     ; Convert individual digits to a single value
@@ -763,12 +803,12 @@ received1OnPosition
 srv1SetOffRate
     movf    temp3,W         ; Store received value ...
     movwf   srv1OffRate     ; ... as servo settings
-    goto    receivedSetting
+    goto    receivedRate
 
 srv1SetOnRate
     movf    temp3,W         ; Store received value ...
     movwf   srv1OnRate      ; ... as servo settings
-    goto    receivedSetting
+    goto    receivedRate
 
 srv2SetOffPosition
     movf    temp3,W         ; Store received value ...
@@ -838,12 +878,12 @@ received2OnPosition
 srv2SetOffRate
     movf    temp3,W         ; Store received value ...
     movwf   srv2OffRate     ; ... as servo settings
-    goto    receivedSetting
+    goto    receivedRate
 
 srv2SetOnRate
     movf    temp3,W         ; Store received value ...
     movwf   srv2OnRate      ; ... as servo settings
-    goto    receivedSetting
+    goto    receivedRate
 
 srv3SetOffPosition
     movf    temp3,W         ; Store received value ...
@@ -913,12 +953,12 @@ received3OnPosition
 srv3SetOffRate
     movf    temp3,W         ; Store received value ...
     movwf   srv3OffRate     ; ... as servo settings
-    goto    receivedSetting
+    goto    receivedRate
 
 srv3SetOnRate
     movf    temp3,W         ; Store received value ...
     movwf   srv3OnRate      ; ... as servo settings
-    goto    receivedSetting
+    goto    receivedRate
 
 srv4SetOffPosition
     movf    temp3,W         ; Store received value ...
@@ -988,22 +1028,41 @@ received4OnPosition
 srv4SetOffRate
     movf    temp3,W         ; Store received value ...
     movwf   srv4OffRate     ; ... as servo settings
-    goto    receivedSetting
+    goto    receivedRate
 
 srv4SetOnRate
     movf    temp3,W         ; Store received value ...
     movwf   srv4OnRate      ; ... as servo settings
 
+receivedRate
+    bcf     STOREDIND       ; Clear servo settings stored indicator
+    bcf     LOADEDIND       ; Clear servo settings loaded indicator
+    clrf    freezeTime      ; Clear setting mode timeout (exit mode)
+    goto    syncSerRx       ; Loop looking for possible serial data
+
 receivedSetting
     bcf     STOREDIND       ; Clear servo settings stored indicator
     bcf     LOADEDIND       ; Clear servo settings loaded indicator
+
+    movlw   TIMEFREEZE      ; Set setting mode timeout (enter mode)
+    movwf   freezeTime
+
     goto    syncSerRx       ; Loop looking for possible serial data
 
 receivedCommand
     movf    temp2,W         ; Test if command ...
+    xorlw   RUNCMND         ; ... is to exit setting mode ...
+    btfss   STATUS,Z        ; ... if so skip ...
+    goto    receivedStore   ; ... otherwise test for reset command
+
+    clrf    freezeTime      ; Clear setting mode timeout (exit mode)
+    goto    syncSerRx
+
+receivedStore
+    movf    temp2,W         ; Test if command ...
     xorlw   STORECMND       ; ... is to store settings ...
     btfss   STATUS,Z        ; ... if so skip ...
-    goto    resetSettings   ; ... otherwise test for reset command
+    goto    receivedReset   ; ... otherwise test for reset command
 
     btfsc   STOREDIND       ; Test if settings have already been stored ...
     goto    syncSerRx
@@ -1029,9 +1088,10 @@ storeSetting
 
     bsf     STOREDIND       ; Set servo settings stored indicator
     bsf     LOADEDIND       ; Set servo settings loaded indicator
+    clrf    freezeTime      ; Clear setting mode timeout (exit mode)
     goto    syncSerRx
 
-resetSettings
+receivedReset
     movf    temp2,W         ; Test if command ...
     xorlw   RESETCMND       ; ... is to reset settings ...
     btfss   STATUS,Z        ; ... if so skip ...
@@ -1072,6 +1132,7 @@ initialise
     movwf   CMCON
 
 loadAllSettings
+    clrf    freezeTime      ; Expire setting mode timeout
     clrf    temp1           ; Clear count of settings loaded from EEPROM
     movlw   srv1Off         ; Load start address of servo settings ...
     movwf   FSR             ; ... into indirect addressing register
