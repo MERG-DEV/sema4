@@ -76,6 +76,9 @@
 ;       multiplied by 16 to update target position.                   *
 ;       Code protection turned on, just in case ...                   *
 ;                                                                     *
+;   30 Jun 2008:                                                      *
+;       Added support for 'long pulse' (2mSec = 180 degrees) servos.  *
+;                                                                     *
 ;**********************************************************************
 
 
@@ -160,6 +163,7 @@ MINSPEED    EQU    1        ; Value for minimum speed
 MIDSPEED    EQU    127      ; Value for middle speed
 MAXSPEED    EQU    255      ; Value for maximum speed
 
+EXTNDCMND   EQU    '!'      ; Command character, extended position pulse flags
 RESETCMND   EQU    '#'      ; Command character to reset settings from EEPROM
 RUNCMND     EQU    '$'      ; Command character to exit setting mode
 STORECMND   EQU    '@'      ; Command character to store settings to EEPROM
@@ -171,10 +175,16 @@ COMMANDBASE EQU    'A'      ; Command character for first setting value
 #define  STOREDIND    sysFlags,0
 #define  LOADEDIND    sysFlags,1
 #define  RXDATAIND    sysFlags,2
+#define  SRV1EXTND    sysFlags,4
+#define  SRV2EXTND    sysFlags,5
+#define  SRV3EXTND    sysFlags,6
+#define  SRV4EXTND    sysFlags,7
 
 ASCIIBIT    EQU    7        ; Bit should be clear in any ASCII character
 DIGITMASK   EQU    0xF0     ; Mask out lower nibble of ASCII digit character
 DIGITTEST   EQU    '0'      ; Test pattern for ASCII digit after applying mask
+
+EXTNDMASK   EQU    0xF0     ; Mask to isolate extended position pulse flags.
 
 
 ;**********************************************************************
@@ -322,6 +332,21 @@ srv4OnRate                  ; On speed
     DE      MIDSPEED
     DE      MIDSPEED
 
+; Extended position pulse indicators
+extndFlags
+    DE      0
+
+
+;**********************************************************************
+; PCLATH setup macro                                                  *
+;**********************************************************************
+SetPCLATH  macro    codeLabel
+
+    movlw   high codeLabel
+    movwf   PCLATH
+
+    endm
+
 
 ;**********************************************************************
 ; Delay loop macro                                                    *
@@ -403,7 +428,7 @@ beginISR
     movf    PCLATH,W        ; Move PCLATH register into W register
     movwf   pclath_isr      ; Save off contents of PCLATH register
 
-    PAGESEL cycleStateTable ; Ensure PCLATH is set for jump code page
+    SetPCLATH cycleStateTable
     movf    cycleState,W    ; Use cycle state value ...
     addwf   PCL,F           ; ... as index for code jump
 
@@ -412,12 +437,16 @@ cycleStateTable
     goto    cycleStart
     goto    srv1Start
     goto    srv1Run
+    goto    srv1Extended
     goto    srv2Start
     goto    srv2Run
+    goto    srv2Extended
     goto    srv3Start
     goto    srv3Run
+    goto    srv3Extended
     goto    srv4Start
     goto    srv4Run
+    goto    srv4Extended
     goto    cycleEnd
 
 #if (high cycleStateTable) != (high $)
@@ -456,6 +485,10 @@ srv1Start
     goto    startpulse
 
 srv1Run
+    btfss   SRV1EXTND       ; Check if servo uses extended position pulse ...
+    incf    cycleState,F    ; ... if not advance past next state
+
+srv1Extended
     movf    srv1NowH,W       ; Set duration for position part of pulse
     goto    runpulse
 
@@ -465,6 +498,10 @@ srv2Start
     goto    startpulse
 
 srv2Run
+    btfss   SRV2EXTND       ; Check if servo uses extended position pulse ...
+    incf    cycleState,F    ; ... if not advance past next state
+
+srv2Extended
     movf    srv2NowH,W       ; Set duration for position part of pulse
     goto    runpulse
 
@@ -474,6 +511,10 @@ srv3Start
     goto    startpulse
 
 srv3Run
+    btfss   SRV3EXTND       ; Check if servo uses extended position pulse ...
+    incf    cycleState,F    ; ... if not advance past next state
+
+srv3Extended
     movf    srv3NowH,W       ; Set duration for position part of pulse
     goto    runpulse
 
@@ -483,6 +524,10 @@ srv4Start
     goto    startpulse
 
 srv4Run
+    btfss   SRV4EXTND       ; Check if servo uses extended position pulse ...
+    incf    cycleState,F    ; ... if not advance past next state
+
+srv4Extended
     movf    srv4NowH,W       ; Set duration for position part of pulse
     goto    runpulse
 
@@ -494,11 +539,13 @@ cycleEnd
 
 ;**********************************************************************
 ; Servo setting position offset lookup subroutine                     *
-;     Servo movement state passed in W                                *
+;     Servo movement state passed in temp3                            *
 ;     Setting offset returned in W                                    *
 ;**********************************************************************
 getServoSettingOffset
-    PAGESEL settingOffsetTable ; Ensure PCLATH is set for jump code page
+    SetPCLATH settingOffsetTable
+
+    movf    temp3,W
     andlw   0x0F
     addwf   PCL,F
 
@@ -526,6 +573,112 @@ settingOffsetTable
 #if (high settingOffsetTable) != (high $)
     error "Servo setting offset lookup table spans 8 bit boundary"
 #endif
+
+
+;**********************************************************************
+;    System initialisation                                            *
+;**********************************************************************
+initialise
+    BANKSEL REGBANK1        ; Ensure register page 1 is selected
+
+    ; Configure input port
+    movlw   PORTADIR
+    movwf   TRISA
+    movlw   PORTAPU
+    movwf   WPUA
+
+    ; Configure output port
+    movlw   PORTCDIR
+    movwf   TRISC
+
+    ; Set internal oscillator calibration
+    call    GETOSCCAL
+    movwf   OSCCAL
+
+    BANKSEL REGBANK0        ; Ensure register page 0 is selected
+
+    ; Turn comparator off
+    movlw   B'00000111'
+    movwf   CMCON
+
+loadAllSettings
+    clrf    freezeTime      ; Expire setting mode timeout
+    clrf    sysFlags        ; Clear: servo settings stored indicator,
+                            ;        servo settings loaded indicator,
+                            ;        data byte received indicator,
+                            ;        extended position pulse indicators
+    bsf     STOREDIND       ; Set servo settings stored indicator
+    bsf     LOADEDIND       ; Set servo settings loaded indicator
+
+    clrf    temp1           ; Clear count of settings loaded from EEPROM
+    movlw   srv1Off         ; Load start address of servo settings ...
+    movwf   FSR             ; ... into indirect addressing register
+
+loadSetting
+    movf    temp1,W         ; Set count as index into EEPROM
+    call    readEEPROM
+
+    movwf   INDF            ; Load setting with value read from EEPROM
+
+    incf    FSR,F           ; Increment to address of next setting
+    incf    temp1,F         ; Increment count of settings loaded from EEPROM
+
+    ; Test if all settings have been loaded from EEPROM
+    movlw   NUMSETTINGS
+    subwf   temp1,W
+    btfss   STATUS,Z
+    goto    loadSetting     ; Keep looping until all settings have been loaded
+
+    movf    temp1,W         ; Set count as index into EEPROM
+    call    readEEPROM
+    andlw   EXTNDMASK       ; Isolate extended position pulse flags ...
+    iorwf   sysFlags,F      ; ... and set in system flags
+
+    ; Initialise servo target positions
+    movf    INPORT,W        ; Read physical input port ...
+    movwf   inpVal          ; ... and save input values from physical port
+
+    ; Servo 1
+    btfsc   SRV1IN          ; Skip if input bit clear, input on (active) ...
+    movf    srv1Off,W       ; ... else set target as off position
+    btfss   SRV1IN          ; Skip if input bit set, input off (inactive)
+    movf    srv1On,W        ; ... else set target as on position
+    movwf   srv1NowH
+    clrf    srv1NowL
+
+    ; Servo 2
+    btfsc   SRV2IN          ; Skip if input bit clear, input on (active) ...
+    movf    srv2Off,W       ; ... else set target as off position
+    btfss   SRV2IN          ; Skip if input bit set, input off (inactive)
+    movf    srv2On,W        ; ... else set target as on position
+    movwf   srv2NowH
+    clrf    srv2NowL
+
+    ; Servo 3
+    btfsc   SRV3IN          ; Skip if input bit clear, input on (active) ...
+    movf    srv3Off,W       ; ... else set target as off position
+    btfss   SRV3IN          ; Skip if input bit set, input off (inactive)
+    movf    srv3On,W        ; ... else set target as on position
+    movwf   srv3NowH
+    clrf    srv3NowL
+
+    ; Servo 4
+    btfsc   SRV4IN          ; Skip if input bit clear, input on (active) ...
+    movf    srv4Off,W       ; ... else set target as off position
+    btfss   SRV4IN          ; Skip if input bit set, input off (inactive)
+    movf    srv4On,W        ; ... else set target as on position
+    movwf   srv4NowH
+    clrf    srv4NowL
+
+    ; Initalise servo movement states
+    clrf    srv1State
+    clrf    srv2State
+    clrf    srv3State
+    clrf    srv4State
+
+    clrf    OUTPORT         ; Clear all outputs
+
+    clrf    cycleState      ; Initialise cycle state to idle
 
 
 ;**********************************************************************
@@ -673,12 +826,13 @@ endSerSync
     AddAsciiDigitToValue    numHundreds, 100, temp3
 
     ; Decode and action the command
+    SetPCLATH commandTable
+
     movlw   COMMANDBASE     ; Convert received command from ASCII ...
     subwf   temp2,W         ; ... to numerical value
     btfss   STATUS,C        ; Check command character not less than base ...
     goto    receivedCommand ; ... else command is not position or speed setting
 
-    PAGESEL commandTable    ; Ensure PCLATH is set for jump code page
     addwf   PCL,F           ; Use numerical command as index for code jump
 
 commandTable
@@ -1086,6 +1240,12 @@ storeSetting
     btfss   STATUS,Z
     goto    storeSetting    ; Keep looping until all settings have been stored
 
+    movlw   EXTNDMASK       ; Isolate extended position pulse flags ...
+    andwf   sysFlags,W      ; ... from in system flags ...
+    movwf   temp2           ; ... and save as EEPROM write value
+    movf    temp1,W         ; Set count as index into EEPROM
+    call    writeEEPROM
+
     bsf     STOREDIND       ; Set servo settings stored indicator
     bsf     LOADEDIND       ; Set servo settings loaded indicator
     clrf    freezeTime      ; Clear setting mode timeout (exit mode)
@@ -1095,7 +1255,7 @@ receivedReset
     movf    temp2,W         ; Test if command ...
     xorlw   RESETCMND       ; ... is to reset settings ...
     btfss   STATUS,Z        ; ... if so skip ...
-    goto    syncSerRx       ; ... otherwise abort
+    goto    receivedExtend  ; ... otherwise abort
 
     btfsc   LOADEDIND       ; Test if settings have already been loaded ...
     goto    syncSerRx       ; ... if so abort
@@ -1104,107 +1264,20 @@ receivedReset
     bsf     LOADEDIND       ; Set servo settings loaded indicator
     goto    loadAllSettings ; Reset all settings from EEPROM
 
+receivedExtend
+    movf    temp2,W         ; Test if command ...
+    xorlw   EXTNDCMND       ; ... is to set extended position pulse flags ...
+    btfss   STATUS,Z        ; ... if so skip ...
+    goto    syncSerRx       ; ... otherwise abort
 
-;**********************************************************************
-;    System initialisation                                            *
-;**********************************************************************
-initialise
-    BANKSEL REGBANK1        ; Ensure register page 1 is selected
+    movlw   ~EXTNDMASK      ; Clear extended position pulse flags ...
+    andwf   sysFlags,F      ; ... from system flags
 
-    ; Configure input port
-    movlw   PORTADIR
-    movwf   TRISA
-    movlw   PORTAPU
-    movwf   WPUA
+    movlw   EXTNDMASK       ; Isolate extended position pulse flags ...
+    andwf   temp3,W         ; ... from received value ...
+    iorwf   sysFlags,F      ; ... and set in system flags
 
-    ; Configure output port
-    movlw   PORTCDIR
-    movwf   TRISC
-
-    ; Set internal oscillator calibration
-    call    GETOSCCAL
-    movwf   OSCCAL
-
-    BANKSEL REGBANK0        ; Ensure register page 0 is selected
-
-    ; Turn comparator off
-    movlw   B'00000111'
-    movwf   CMCON
-
-loadAllSettings
-    clrf    freezeTime      ; Expire setting mode timeout
-    clrf    temp1           ; Clear count of settings loaded from EEPROM
-    movlw   srv1Off         ; Load start address of servo settings ...
-    movwf   FSR             ; ... into indirect addressing register
-
-loadSetting
-    movf    temp1,W         ; Set count as index into EEPROM
-    call    readEEPROM
-
-    movwf   INDF            ; Load setting with value read from EEPROM
-
-    incf    FSR,F           ; Increment to address of next setting
-    incf    temp1,F         ; Increment count of settings loaded from EEPROM
-
-    ; Test if all settings have been loaded from EEPROM
-    movlw   NUMSETTINGS
-    subwf   temp1,W
-    btfss   STATUS,Z
-    goto    loadSetting     ; Keep looping until all settings have been loaded
-
-    clrf    sysFlags        ; Clear: servo settings stored indicator,
-                            ;        servo settings loaded indicator,
-                            ;        data byte received indicator,
-    bsf     STOREDIND       ; Set servo settings stored indicator
-    bsf     LOADEDIND       ; Set servo settings loaded indicator
-
-    ; Initialise servo target positions
-    movf    INPORT,W        ; Read physical input port ...
-    movwf   inpVal          ; ... and save input values from physical port
-
-    ; Servo 1
-    btfsc   SRV1IN          ; Skip if input bit clear, input on (active) ...
-    movf    srv1Off,W       ; ... else set target as off position
-    btfss   SRV1IN          ; Skip if input bit set, input off (inactive)
-    movf    srv1On,W        ; ... else set target as on position
-    movwf   srv1NowH
-    clrf    srv1NowL
-
-    ; Servo 2
-    btfsc   SRV2IN          ; Skip if input bit clear, input on (active) ...
-    movf    srv2Off,W       ; ... else set target as off position
-    btfss   SRV2IN          ; Skip if input bit set, input off (inactive)
-    movf    srv2On,W        ; ... else set target as on position
-    movwf   srv2NowH
-    clrf    srv2NowL
-
-    ; Servo 3
-    btfsc   SRV3IN          ; Skip if input bit clear, input on (active) ...
-    movf    srv3Off,W       ; ... else set target as off position
-    btfss   SRV3IN          ; Skip if input bit set, input off (inactive)
-    movf    srv3On,W        ; ... else set target as on position
-    movwf   srv3NowH
-    clrf    srv3NowL
-
-    ; Servo 4
-    btfsc   SRV4IN          ; Skip if input bit clear, input on (active) ...
-    movf    srv4Off,W       ; ... else set target as off position
-    btfss   SRV4IN          ; Skip if input bit set, input off (inactive)
-    movf    srv4On,W        ; ... else set target as on position
-    movwf   srv4NowH
-    clrf    srv4NowL
-
-    ; Initalise servo movement states
-    clrf    srv1State
-    clrf    srv2State
-    clrf    srv3State
-    clrf    srv4State
-
-    clrf    OUTPORT         ; Clear all outputs
-
-    clrf    cycleState      ; Initialise cycle state to idle
-
-    goto    main            ; Execute main program loop
+    goto    syncSerRx       ; ... otherwise abort
 
 
 ;**********************************************************************
@@ -1345,6 +1418,7 @@ ServoUpdate  macro    srvState, srvSettings, srvRate, srvNow
     movwf   FSR             ; ... into indirect addressing register
 
     movf    srvState,W      ; Get servo settings offset based on state
+    movwf   temp3
     call    getServoSettingOffset
 
     addwf   FSR,F           ; Add offset to servo settings base address
