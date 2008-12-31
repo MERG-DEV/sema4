@@ -118,7 +118,7 @@ SLOWOPTIONS EQU    B'00000110' ; Options: PORTA pull-ups enabled,
 
 INPORT      EQU    PORTA
 PORTADIR    EQU    B'11111111' ; All port bits inputs
-PORTAPU     EQU    B'11111101' ; Pull up on port bits except serial input
+PORTAPU     EQU    B'11111011' ; Pull up on port bits except serial input
 
 OUTPORT     EQU    PORTC
 PORTCDIR    EQU    B'00000000' ; All port bits outputs
@@ -134,9 +134,9 @@ RXSTARTTIME EQU    156         ; Delay count for 1.5 serial bits
 TIMEFREEZE  EQU    128         ; Number of cycles for setting mode timeout
 
 SRVOFFST    EQU    7
-SRVONST     EQU    (B'00000001000' | SRVOFFST)
+SRVONST     EQU    (B'00001000' | SRVOFFST)
 SRVONSTBIT  EQU    3
-SRVSTMASK   EQU    B'00000000111'
+SRVSTMASK   EQU    B'00000111'
 
 ; Servo control bit definitions (active low)
 #define  SRV1IN    inpVal,0
