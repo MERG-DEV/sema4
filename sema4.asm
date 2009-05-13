@@ -136,10 +136,11 @@ RXSTARTTIME EQU    156         ; Delay count for 1.5 serial bits
 
 TIMEFREEZE  EQU    128         ; Number of cycles for setting mode timeout
 
-SRVOFFST    EQU    15
-SRVONST     EQU    (B'00010000' | SRVOFFST)
-SRVONSTBIT  EQU    3
-SRVSTMASK   EQU    B'00001111'
+SRVOFFST    EQU    31
+SRVONST     EQU   (B'00100000' | SRVOFFST)
+SRVONSTBIT  EQU    5
+SRVSTMASK   EQU    B'00011111'
+SRVSTFLTR   EQU   (B'00100000' | SRVSTMASK)
 
 ; Servo control bit definitions (active low)
 #define  SRV1IN    inpVal,0
@@ -518,45 +519,77 @@ getServoSettingOffset
     SetPCLATH settingOffsetTable
 
     movf    temp3,W
-    andlw   0x0F
+    andlw   SRVSTFLTR
     addwf   PCL,F
 
 settingOffsetTable
     ; Off movement states
     retlw   (srv1Off  - srv1Off) ; State  0, actually do nothing
     retlw   (srv1Off  - srv1Off) ; State  1, actually do nothing
-    retlw   (srv1Off  - srv1Off) ; State  2, pause at to off position
-    retlw   (srv1Off  - srv1Off) ; State  3, move back to off position
-    retlw   (srv1Off3 - srv1Off) ; State  4, pause at off 3rd bounce
-    retlw   (srv1Off3 - srv1Off) ; State  5, move to off 3rd bounce
-    retlw   (srv1Off  - srv1Off) ; State  6, pause at off position
+    retlw   (srv1Off  - srv1Off) ; State  2, actually do nothing
+    retlw   (srv1Off  - srv1Off) ; State  3, actually do nothing
+    retlw   (srv1Off  - srv1Off) ; State  4, pause at to off position
+    retlw   (srv1Off  - srv1Off) ; State  5, pause at to off position
+    retlw   (srv1Off  - srv1Off) ; State  6, pause at to off position
     retlw   (srv1Off  - srv1Off) ; State  7, move back to off position
-    retlw   (srv1Off2 - srv1Off) ; State  8, pause at off 2nd bounce
-    retlw   (srv1Off2 - srv1Off) ; State  9, move to off 2nd bounce
-    retlw   (srv1Off  - srv1Off) ; State 10, pause at off position
-    retlw   (srv1Off  - srv1Off) ; State 11, move back to off position
-    retlw   (srv1Off1 - srv1Off) ; State 12, pause at off 1st bounce
-    retlw   (srv1Off1 - srv1Off) ; State 13, move to off 1st bounce
+    retlw   (srv1Off3 - srv1Off) ; State  8, pause at off 3rd bounce
+    retlw   (srv1Off3 - srv1Off) ; State  9, pause at off 3rd bounce
+    retlw   (srv1Off3 - srv1Off) ; State 10, pause at off 3rd bounce
+    retlw   (srv1Off3 - srv1Off) ; State 11, move to off 3rd bounce
+    retlw   (srv1Off  - srv1Off) ; State 12, pause at off position
+    retlw   (srv1Off  - srv1Off) ; State 13, pause at off position
     retlw   (srv1Off  - srv1Off) ; State 14, pause at off position
-    retlw   (srv1Off  - srv1Off) ; State 15, move to off position
+    retlw   (srv1Off  - srv1Off) ; State 15, move back to off position
+    retlw   (srv1Off2 - srv1Off) ; State 16, pause at off 2nd bounce
+    retlw   (srv1Off2 - srv1Off) ; State 17, pause at off 2nd bounce
+    retlw   (srv1Off2 - srv1Off) ; State 18, pause at off 2nd bounce
+    retlw   (srv1Off2 - srv1Off) ; State 19, move to off 2nd bounce
+    retlw   (srv1Off  - srv1Off) ; State 20, pause at off position
+    retlw   (srv1Off  - srv1Off) ; State 21, pause at off position
+    retlw   (srv1Off  - srv1Off) ; State 22, pause at off position
+    retlw   (srv1Off  - srv1Off) ; State 23, move back to off position
+    retlw   (srv1Off1 - srv1Off) ; State 24, pause at off 1st bounce
+    retlw   (srv1Off1 - srv1Off) ; State 25, pause at off 1st bounce
+    retlw   (srv1Off1 - srv1Off) ; State 26, pause at off 1st bounce
+    retlw   (srv1Off1 - srv1Off) ; State 27, move to off 1st bounce
+    retlw   (srv1Off  - srv1Off) ; State 28, pause at off position
+    retlw   (srv1Off  - srv1Off) ; State 29, pause at off position
+    retlw   (srv1Off  - srv1Off) ; State 30, pause at off position
+    retlw   (srv1Off  - srv1Off) ; State 31, move to off position
 
     ; On movement states
-    retlw   (srv1On   - srv1Off) ; State 16, actually do nothing
-    retlw   (srv1On   - srv1Off) ; State 17, actually do nothing
-    retlw   (srv1On   - srv1Off) ; State 18, pause at on position
-    retlw   (srv1On   - srv1Off) ; State 19, move back to on position
-    retlw   (srv1On3  - srv1Off) ; State 20, pause at on 3rd bounce
-    retlw   (srv1On3  - srv1Off) ; State 21, move to on 3rd bounce
-    retlw   (srv1On   - srv1Off) ; State 22, pause at on position
-    retlw   (srv1On   - srv1Off) ; State 23, move back to on position
-    retlw   (srv1On2  - srv1Off) ; State 24, pause at on 2nd bounce
-    retlw   (srv1On2  - srv1Off) ; State 25, move to on 2nd bounce
-    retlw   (srv1On   - srv1Off) ; State 26, pause at on position
-    retlw   (srv1On   - srv1Off) ; State 27, move back to on position
-    retlw   (srv1On1  - srv1Off) ; State 28, pause at on 1st bounce
-    retlw   (srv1On1  - srv1Off) ; State 29, move to on 1st bounce
-    retlw   (srv1On   - srv1Off) ; State 30, pause at on position
-    retlw   (srv1On   - srv1Off) ; State 31, move to on position
+    retlw   (srv1On   - srv1Off) ; State 32, actually do nothing
+    retlw   (srv1On   - srv1Off) ; State 33, actually do nothing
+    retlw   (srv1On   - srv1Off) ; State 34, actually do nothing
+    retlw   (srv1On   - srv1Off) ; State 35, actually do nothing
+    retlw   (srv1On   - srv1Off) ; State 36, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 37, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 38, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 39, move back to on position
+    retlw   (srv1On3  - srv1Off) ; State 40, pause at on 3rd bounce
+    retlw   (srv1On3  - srv1Off) ; State 41, pause at on 3rd bounce
+    retlw   (srv1On3  - srv1Off) ; State 42, pause at on 3rd bounce
+    retlw   (srv1On3  - srv1Off) ; State 43, move to on 3rd bounce
+    retlw   (srv1On   - srv1Off) ; State 44, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 45, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 46, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 47, move back to on position
+    retlw   (srv1On2  - srv1Off) ; State 48, pause at on 2nd bounce
+    retlw   (srv1On2  - srv1Off) ; State 49, pause at on 2nd bounce
+    retlw   (srv1On2  - srv1Off) ; State 50, pause at on 2nd bounce
+    retlw   (srv1On2  - srv1Off) ; State 51, move to on 2nd bounce
+    retlw   (srv1On   - srv1Off) ; State 52, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 53, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 54, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 55, move back to on position
+    retlw   (srv1On1  - srv1Off) ; State 56, pause at on 1st bounce
+    retlw   (srv1On1  - srv1Off) ; State 57, pause at on 1st bounce
+    retlw   (srv1On1  - srv1Off) ; State 58, pause at on 1st bounce
+    retlw   (srv1On1  - srv1Off) ; State 59, move to on 1st bounce
+    retlw   (srv1On   - srv1Off) ; State 60, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 61, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 62, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 63, move to on position
 
 #if (high settingOffsetTable) != (high $)
     error "Servo setting offset lookup table spans 8 bit boundary"
