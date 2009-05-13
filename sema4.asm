@@ -10,7 +10,7 @@
 ;                                                                     *
 ;**********************************************************************
 ;                                                                     *
-;   Issue: 1    Rev.: B                                               *
+;   Issue: 1    Rev.: C                                               *
 ;                                                                     *
 ;   Gives the pulse output for 4 conventional servos.                 *
 ;   Input control by on / off switches to ground.                     *
@@ -79,6 +79,9 @@
 ;   30 Jun 2008:                                                      *
 ;       Replaced PAGESEL with SetPCLATH.                              *
 ;                                                                     *
+;    6 May 2009:                                                      *
+;       Added pause states to allow servo to complete movement.       *
+;                                                                     *
 ;**********************************************************************
 
 
@@ -133,10 +136,10 @@ RXSTARTTIME EQU    156         ; Delay count for 1.5 serial bits
 
 TIMEFREEZE  EQU    128         ; Number of cycles for setting mode timeout
 
-SRVOFFST    EQU    7
-SRVONST     EQU    (B'00001000' | SRVOFFST)
+SRVOFFST    EQU    15
+SRVONST     EQU    (B'00010000' | SRVOFFST)
 SRVONSTBIT  EQU    3
-SRVSTMASK   EQU    B'00000111'
+SRVSTMASK   EQU    B'00001111'
 
 ; Servo control bit definitions (active low)
 #define  SRV1IN    inpVal,0
@@ -470,7 +473,7 @@ srv1Start
     goto    startpulse
 
 srv1Run
-    movf    srv1NowH,W       ; Set duration for position part of pulse
+    movf    srv1NowH,W      ; Set duration for position part of pulse
     goto    runpulse
 
 srv2Start
@@ -479,7 +482,7 @@ srv2Start
     goto    startpulse
 
 srv2Run
-    movf    srv2NowH,W       ; Set duration for position part of pulse
+    movf    srv2NowH,W      ; Set duration for position part of pulse
     goto    runpulse
 
 srv3Start
@@ -488,7 +491,7 @@ srv3Start
     goto    startpulse
 
 srv3Run
-    movf    srv3NowH,W       ; Set duration for position part of pulse
+    movf    srv3NowH,W      ; Set duration for position part of pulse
     goto    runpulse
 
 srv4Start
@@ -497,7 +500,7 @@ srv4Start
     goto    startpulse
 
 srv4Run
-    movf    srv4NowH,W       ; Set duration for position part of pulse
+    movf    srv4NowH,W      ; Set duration for position part of pulse
     goto    runpulse
 
 cycleEnd
@@ -520,24 +523,40 @@ getServoSettingOffset
 
 settingOffsetTable
     ; Off movement states
-    retlw   (srv1Off  - srv1Off) ; State 0, actually do nothing
-    retlw   (srv1Off  - srv1Off) ; State 1, move back to off position
-    retlw   (srv1Off3 - srv1Off) ; State 2, move to off 3rd bounce
-    retlw   (srv1Off  - srv1Off) ; State 3, move back to off position
-    retlw   (srv1Off2 - srv1Off) ; State 4, move to off 2nd bounce
-    retlw   (srv1Off  - srv1Off) ; State 5, move back to off position
-    retlw   (srv1Off1 - srv1Off) ; State 6, move to off 1st bounce
-    retlw   (srv1Off  - srv1Off) ; State 7, move to off position
+    retlw   (srv1Off  - srv1Off) ; State  0, actually do nothing
+    retlw   (srv1Off  - srv1Off) ; State  1, actually do nothing
+    retlw   (srv1Off  - srv1Off) ; State  2, pause at to off position
+    retlw   (srv1Off  - srv1Off) ; State  3, move back to off position
+    retlw   (srv1Off3 - srv1Off) ; State  4, pause at off 3rd bounce
+    retlw   (srv1Off3 - srv1Off) ; State  5, move to off 3rd bounce
+    retlw   (srv1Off  - srv1Off) ; State  6, pause at off position
+    retlw   (srv1Off  - srv1Off) ; State  7, move back to off position
+    retlw   (srv1Off2 - srv1Off) ; State  8, pause at off 2nd bounce
+    retlw   (srv1Off2 - srv1Off) ; State  9, move to off 2nd bounce
+    retlw   (srv1Off  - srv1Off) ; State 10, pause at off position
+    retlw   (srv1Off  - srv1Off) ; State 11, move back to off position
+    retlw   (srv1Off1 - srv1Off) ; State 12, pause at off 1st bounce
+    retlw   (srv1Off1 - srv1Off) ; State 13, move to off 1st bounce
+    retlw   (srv1Off  - srv1Off) ; State 14, pause at off position
+    retlw   (srv1Off  - srv1Off) ; State 15, move to off position
 
     ; On movement states
-    retlw   (srv1On   - srv1Off) ; State  8, actually do nothing
-    retlw   (srv1On   - srv1Off) ; State  9, move back to on position
-    retlw   (srv1On3  - srv1Off) ; State 10, move to on 3rd bounce
-    retlw   (srv1On   - srv1Off) ; State 11, move back to on position
-    retlw   (srv1On2  - srv1Off) ; State 12, move to on 2nd bounce
-    retlw   (srv1On   - srv1Off) ; State 13, move back to on position
-    retlw   (srv1On1  - srv1Off) ; State 14, move to on 1st bounce
-    retlw   (srv1On   - srv1Off) ; State 15, move to on position
+    retlw   (srv1On   - srv1Off) ; State 16, actually do nothing
+    retlw   (srv1On   - srv1Off) ; State 17, actually do nothing
+    retlw   (srv1On   - srv1Off) ; State 18, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 19, move back to on position
+    retlw   (srv1On3  - srv1Off) ; State 20, pause at on 3rd bounce
+    retlw   (srv1On3  - srv1Off) ; State 21, move to on 3rd bounce
+    retlw   (srv1On   - srv1Off) ; State 22, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 23, move back to on position
+    retlw   (srv1On2  - srv1Off) ; State 24, pause at on 2nd bounce
+    retlw   (srv1On2  - srv1Off) ; State 25, move to on 2nd bounce
+    retlw   (srv1On   - srv1Off) ; State 26, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 27, move back to on position
+    retlw   (srv1On1  - srv1Off) ; State 28, pause at on 1st bounce
+    retlw   (srv1On1  - srv1Off) ; State 29, move to on 1st bounce
+    retlw   (srv1On   - srv1Off) ; State 30, pause at on position
+    retlw   (srv1On   - srv1Off) ; State 31, move to on position
 
 #if (high settingOffsetTable) != (high $)
     error "Servo setting offset lookup table spans 8 bit boundary"
@@ -1248,7 +1267,7 @@ nextSerDataBit
     btfss   SERRXIN         ; Test RX bit on serial input ...
     bsf     STATUS,C        ; ... if not set then set carry flag in status
 
-    rrf     temp3,F        ; Rotate right RS232 receive byte through carry
+    rrf     temp3,F         ; Rotate right RS232 receive byte through carry
 
     btfsc   STATUS,C        ; Check if got all serial data bits ...
     goto    continueSerData ; ... if not keep receiving data bits ...
@@ -1276,29 +1295,29 @@ endSerData
 ;     Address in W, value in temp2                                    *
 ;**********************************************************************
 writeEEPROM
-    BANKSEL EECON1            ; Ensure correct register page is selected
+    BANKSEL EECON1          ; Ensure correct register page is selected
 waitWriteEE
-    btfsc   EECON1,WR         ; Skip EEPROM write not 'in progress' ...
-    goto    waitWriteEE       ; ... else wait for write to complete
+    btfsc   EECON1,WR       ; Skip EEPROM write not 'in progress' ...
+    goto    waitWriteEE     ; ... else wait for write to complete
 
-    movwf   EEADR             ; Set address of EEPROM location to write
+    movwf   EEADR           ; Set address of EEPROM location to write
     movf    temp2,W
-    movwf   EEDATA            ; Set EEPROM location value
+    movwf   EEDATA          ; Set EEPROM location value
 
-    bsf     EECON1,WREN       ; Enable EEPROM writes
-    bcf     INTCON,GIE        ; Disable interrupts
-    bcf     INTCON,GIE        ; Ensure interrupts are disabled
+    bsf     EECON1,WREN     ; Enable EEPROM writes
+    bcf     INTCON,GIE      ; Disable interrupts
+    bcf     INTCON,GIE      ; Ensure interrupts are disabled
     movlw   0x55
     movwf   EECON2
     movlw   0xAA
     movwf   EECON2
-    bsf     EECON1,WR         ; Set EEPROM write status, ...
-                              ; ... initiates hardware write cycle
-    bcf     EECON1,EEIF       ; Clear EE write complete interrupt flag
-    bcf     EECON1,WREN       ; Disable EEPROM writes
+    bsf     EECON1,WR       ; Set EEPROM write status, ...
+                            ; ... initiates hardware write cycle
+    bcf     EECON1,EEIF     ; Clear EE write complete interrupt flag
+    bcf     EECON1,WREN     ; Disable EEPROM writes
 
-    bsf     INTCON,GIE        ; Enable interrupts
-    BANKSEL 0                 ; Select register page 0
+    bsf     INTCON,GIE      ; Enable interrupts
+    BANKSEL 0               ; Select register page 0
     return
 
 
@@ -1354,7 +1373,7 @@ ServoUpdate  macro    srvState, srvSettings, srvRate, srvNow
     movlw   SRVSTMASK       ; Mask direction bit ...
     andwf   srvState,W      ; ... from servo movement state
     btfsc   STATUS,Z        ; Test if movement not yet complete ...
-    goto    skipServoUpdate  ; ... otherwise do nothing
+    goto    skipServoUpdate ; ... otherwise do nothing
 
     movlw   srvSettings     ; Load servo settings base address
     movwf   FSR             ; ... into indirect addressing register
