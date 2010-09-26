@@ -10,7 +10,7 @@
 ;                                                                     *
 ;**********************************************************************
 ;                                                                     *
-;   Issue: 1    Rev.: C                                               *
+;   Issue: 1    Rev.: D                                               *
 ;                                                                     *
 ;   Gives the pulse output for 4 conventional servos.                 *
 ;   Input control by on / off switches to ground.                     *
@@ -81,6 +81,10 @@
 ;                                                                     *
 ;    6 May 2009:                                                      *
 ;       Added pause states to allow servo to complete movement.       *
+;                                                                     *
+;    26 Sep 2010:                                                     *
+;       New Sema4b commands to set rates. Original command sets rate  *
+;       x 16 (by nibble swap) to become properly Servo4 compatible.   *
 ;                                                                     *
 ;**********************************************************************
 
@@ -899,6 +903,14 @@ commandTable
     goto    srv3SetOnOnly
     goto    srv4SetOffOnly
     goto    srv4SetOnOnly
+    goto    srv1NewOffRate
+    goto    srv1NewOnRate
+    goto    srv2NewOffRate
+    goto    srv2NewOnRate
+    goto    srv3NewOffRate
+    goto    srv3NewOnRate
+    goto    srv4NewOffRate
+    goto    srv4NewOnRate
 
 #if (high commandTable) != (high $)
     error "Received command jump table spans 8 bit boundary"
@@ -969,13 +981,17 @@ received1OnPosition
     bsf     srv1State,SRVONSTBIT
     goto    receivedSetting
 
+srv1NewOffRate
+    swapf   temp3,F         ; Negate effect of following nibble swap
 srv1SetOffRate
-    movf    temp3,W         ; Store received value ...
+    swapf   temp3,W         ; Store received value (x16 by nibble swap) ...
     movwf   srv1OffRate     ; ... as servo settings
     goto    receivedRate
 
+srv1NewOnRate
+    swapf   temp3,F         ; Negate effect of following nibble swap
 srv1SetOnRate
-    movf    temp3,W         ; Store received value ...
+    swapf   temp3,W         ; Store received value (x16 by nibble swap) ...
     movwf   srv1OnRate      ; ... as servo settings
     goto    receivedRate
 
@@ -1044,13 +1060,17 @@ received2OnPosition
     bsf     srv2State,SRVONSTBIT
     goto    receivedSetting
 
+srv2NewOffRate
+    swapf   temp3,F         ; Negate effect of following nibble swap
 srv2SetOffRate
-    movf    temp3,W         ; Store received value ...
+    swapf   temp3,W         ; Store received value (x16 by nibble swap) ...
     movwf   srv2OffRate     ; ... as servo settings
     goto    receivedRate
 
+srv2NewOnRate
+    swapf   temp3,F         ; Negate effect of following nibble swap
 srv2SetOnRate
-    movf    temp3,W         ; Store received value ...
+    swapf   temp3,W         ; Store received value (x16 by nibble swap) ...
     movwf   srv2OnRate      ; ... as servo settings
     goto    receivedRate
 
@@ -1119,13 +1139,17 @@ received3OnPosition
     bsf     srv3State,SRVONSTBIT
     goto    receivedSetting
 
+srv3NewOffRate
+    swapf   temp3,F         ; Negate effect of following nibble swap
 srv3SetOffRate
-    movf    temp3,W         ; Store received value ...
+    swapf   temp3,W         ; Store received value (x16 by nibble swap) ...
     movwf   srv3OffRate     ; ... as servo settings
     goto    receivedRate
 
+srv3NewOnRate
+    swapf   temp3,F         ; Negate effect of following nibble swap
 srv3SetOnRate
-    movf    temp3,W         ; Store received value ...
+    swapf   temp3,W         ; Store received value (x16 by nibble swap) ...
     movwf   srv3OnRate      ; ... as servo settings
     goto    receivedRate
 
@@ -1194,13 +1218,17 @@ received4OnPosition
     bsf     srv1State,SRVONSTBIT
     goto    receivedSetting
 
+srv4NewOffRate
+    swapf   temp3,F         ; Negate effect of following nibble swap
 srv4SetOffRate
-    movf    temp3,W         ; Store received value ...
+    swapf   temp3,W         ; Store received value (x16 by nibble swap) ...
     movwf   srv4OffRate     ; ... as servo settings
     goto    receivedRate
 
+srv4NewOnRate
+    swapf   temp3,F         ; Negate effect of following nibble swap
 srv4SetOnRate
-    movf    temp3,W         ; Store received value ...
+    swapf   temp3,W         ; Store received value (x16 by nibble swap) ...
     movwf   srv4OnRate      ; ... as servo settings
 
 receivedRate
