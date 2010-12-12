@@ -601,6 +601,83 @@ settingOffsetTable
 
 
 ;**********************************************************************
+; Command decode jump table                                           *
+;     Recieved command passed in temp2                                *
+;**********************************************************************
+decodeCommand
+    SetPCLATH commandTable
+
+    movlw   COMMANDBASE     ; Convert received command from ASCII ...
+    subwf   temp2,W         ; ... to numerical value
+    btfss   STATUS,C        ; Check command character not less than base ...
+    goto    receivedCommand ; ... else command is not position or speed setting
+
+    addwf   PCL,F           ; Use numerical command as index for code jump
+
+commandTable
+    goto    srv1SetOffPosition
+    goto    srv1SetOnPosition
+    goto    srv1SetOffRate
+    goto    srv1SetOnRate
+    goto    srv2SetOffPosition
+    goto    srv2SetOnPosition
+    goto    srv2SetOffRate
+    goto    srv2SetOnRate
+    goto    srv3SetOffPosition
+    goto    srv3SetOnPosition
+    goto    srv3SetOffRate
+    goto    srv3SetOnRate
+    goto    srv4SetOffPosition
+    goto    srv4SetOnPosition
+    goto    srv4SetOffRate
+    goto    srv4SetOnRate
+    goto    srv1SetOff1Position
+    goto    srv1SetOff2Position
+    goto    srv1SetOff3Position
+    goto    srv1SetOn1Position
+    goto    srv1SetOn2Position
+    goto    srv1SetOn3Position
+    goto    srv2SetOff1Position
+    goto    srv2SetOff2Position
+    goto    srv2SetOff3Position
+    goto    srv2SetOn1Position
+    goto    srv2SetOn2Position
+    goto    srv2SetOn3Position
+    goto    srv3SetOff1Position
+    goto    srv3SetOff2Position
+    goto    srv3SetOff3Position
+    goto    srv3SetOn1Position
+    goto    srv3SetOn2Position
+    goto    srv3SetOn3Position
+    goto    srv4SetOff1Position
+    goto    srv4SetOff2Position
+    goto    srv4SetOff3Position
+    goto    srv4SetOn1Position
+    goto    srv4SetOn2Position
+    goto    srv4SetOn3Position
+    goto    srv1SetOffOnly
+    goto    srv1SetOnOnly
+    goto    srv2SetOffOnly
+    goto    srv2SetOnOnly
+    goto    srv3SetOffOnly
+    goto    srv3SetOnOnly
+    goto    srv4SetOffOnly
+    goto    srv4SetOnOnly
+    goto    srv1NewOffRate
+    goto    srv1NewOnRate
+    goto    srv2NewOffRate
+    goto    srv2NewOnRate
+    goto    srv3NewOffRate
+    goto    srv3NewOnRate
+    goto    srv4NewOffRate
+    goto    srv4NewOnRate
+
+#if (high commandTable) != (high $)
+    error "Received command jump table spans 8 bit boundary"
+#endif
+
+
+;**********************************************************************
 ;    System initialisation                                            *
 ;**********************************************************************
 initialise
@@ -845,76 +922,7 @@ endSerSync
     AddAsciiDigitToValue    numHundreds, 100, temp3
 
     ; Decode and action the command
-    SetPCLATH commandTable
-
-    movlw   COMMANDBASE     ; Convert received command from ASCII ...
-    subwf   temp2,W         ; ... to numerical value
-    btfss   STATUS,C        ; Check command character not less than base ...
-    goto    receivedCommand ; ... else command is not position or speed setting
-
-    addwf   PCL,F           ; Use numerical command as index for code jump
-
-commandTable
-    goto    srv1SetOffPosition
-    goto    srv1SetOnPosition
-    goto    srv1SetOffRate
-    goto    srv1SetOnRate
-    goto    srv2SetOffPosition
-    goto    srv2SetOnPosition
-    goto    srv2SetOffRate
-    goto    srv2SetOnRate
-    goto    srv3SetOffPosition
-    goto    srv3SetOnPosition
-    goto    srv3SetOffRate
-    goto    srv3SetOnRate
-    goto    srv4SetOffPosition
-    goto    srv4SetOnPosition
-    goto    srv4SetOffRate
-    goto    srv4SetOnRate
-    goto    srv1SetOff1Position
-    goto    srv1SetOff2Position
-    goto    srv1SetOff3Position
-    goto    srv1SetOn1Position
-    goto    srv1SetOn2Position
-    goto    srv1SetOn3Position
-    goto    srv2SetOff1Position
-    goto    srv2SetOff2Position
-    goto    srv2SetOff3Position
-    goto    srv2SetOn1Position
-    goto    srv2SetOn2Position
-    goto    srv2SetOn3Position
-    goto    srv3SetOff1Position
-    goto    srv3SetOff2Position
-    goto    srv3SetOff3Position
-    goto    srv3SetOn1Position
-    goto    srv3SetOn2Position
-    goto    srv3SetOn3Position
-    goto    srv4SetOff1Position
-    goto    srv4SetOff2Position
-    goto    srv4SetOff3Position
-    goto    srv4SetOn1Position
-    goto    srv4SetOn2Position
-    goto    srv4SetOn3Position
-    goto    srv1SetOffOnly
-    goto    srv1SetOnOnly
-    goto    srv2SetOffOnly
-    goto    srv2SetOnOnly
-    goto    srv3SetOffOnly
-    goto    srv3SetOnOnly
-    goto    srv4SetOffOnly
-    goto    srv4SetOnOnly
-    goto    srv1NewOffRate
-    goto    srv1NewOnRate
-    goto    srv2NewOffRate
-    goto    srv2NewOnRate
-    goto    srv3NewOffRate
-    goto    srv3NewOnRate
-    goto    srv4NewOffRate
-    goto    srv4NewOnRate
-
-#if (high commandTable) != (high $)
-    error "Received command jump table spans 8 bit boundary"
-#endif
+    goto    decodeCommand
 
 srv1SetOffPosition
     movf    temp3,W         ; Store received value ...
