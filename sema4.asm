@@ -1,5 +1,5 @@
     title    "$Id$"
-    list     p=16F630
+    list     p=16F684
     radix    dec
 
 ;**********************************************************************
@@ -86,6 +86,24 @@
 ;       New Sema4b commands to set rates. Original command sets rate  *
 ;       x 16 (by nibble swap) to become properly Servo4 compatible.   *
 ;                                                                     *
+;   29-11-10 Modified by GH M328 for use on 'Bouncer' with 16F684.    *
+;       Critical file registers moved to 0x7X Access Area as part of  *
+;       migration from 16F630 which shares all regs across banks.     *
+;       Pinouts changed to suit Bouncer PCB.                          *
+;       Config altered to suit 16F684 definitions.                    *
+;                                                                     *
+;**********************************************************************
+;                                                                     *
+;                             +---+ +---+                             *
+;     +5V (Molex 2) ->     VDD|1  |_| 14|VSS         <-  (Molex 1) 0V *
+;        Servo1 Out <-     RA5|2      13|RA0/ICSPDAT <-> (Molex 4)    *
+; Rx Data (Molex 5) ->     RA4|3      12|RA1/ICSPCLK <-  (Molex 6)    *
+;         (Molex 3) -> VPP/RA3|4      11|RA2         <-  Servo1 In    *
+;        Servo2 Out <-     RC5|5      10|RC0         <-  Servo2 In    *
+;        Servo3 Out <-     RC4|6       9|RC1         <-  Servo3 In    *
+;        Servo4 Out <-     RC3|7       8|RC2         <-  Servo4 In    *
+;                             +---------+                             *
+;                                                                     *
 ;**********************************************************************
 
 
@@ -93,9 +111,9 @@
 ; Include and configuration directives                                *
 ;**********************************************************************
 
-#include <p16f630.inc>
+#include <p16f684.inc>
 
-    __CONFIG   _CPD_OFF & _CP & _BODEN & _MCLRE_ON & _PWRTE_ON & _WDT_OFF & _INTRC_OSC_NOCLKOUT
+    __CONFIG   _CPD_OFF & _CP_OFF & _BOD_ON & _MCLRE_ON & _PWRTE_ON & _WDT_OFF & _INTRC_OSC_NOCLKOUT
 
 ; '__CONFIG' directive is used to embed configuration data within .asm file.
 ; The lables following the directive are located in the respective .inc file.
@@ -123,15 +141,15 @@ SLOWOPTIONS EQU    B'00000110' ; Options: PORTA pull-ups enabled,
                                ;          TMR0 from CLKOUT (1MHz),
                                ;          TMR0 prescaler 1:128 (7,812.5Hz)
 
-INPORT      EQU    PORTA
-PORTADIR    EQU    B'11111111' ; All port bits inputs
-PORTAPU     EQU    B'11111011' ; Pull up on port bits except serial input
+INPORT		EQU    PORTA
+PORTADIR	EQU    B'11011111' ; All port bits inputs except 5 (out1)
+PORTAPU		EQU    B'11101111' ; Pull up on port bits except serial input
 
-OUTPORT     EQU    PORTC
-PORTCDIR    EQU    B'00000000' ; All port bits outputs
+OUTPORT		EQU    PORTC
+PORTCDIR	EQU    B'00000111' ; Port bits outputs except 0,1,2 (in2, in3, in4)
 
 ; Serial RX input port bit definition
-#define  SERRXIN   INPORT,2
+#define  SERRXIN   INPORT,4
 
 RS232BITS   EQU    B'01111111' ; RS232 8 data bits (right shifted into carry)
 ; RS232 delay in instruction cycles for 9K6 baud at 1MHz clock
@@ -147,19 +165,19 @@ SRVSTMASK   EQU    B'00011111'
 SRVSTFLTR   EQU   (B'00100000' | SRVSTMASK)
 
 ; Servo control bit definitions (active low)
-#define  SRV1IN    inpVal,0
-#define  SRV2IN    inpVal,1
-#define  SRV3IN    inpVal,4
-#define  SRV4IN    inpVal,5
+#define  SRV1IN    PORTA,2
+#define  SRV2IN    PORTC,0
+#define  SRV3IN    PORTC,1
+#define  SRV4IN    PORTC,2
 
 ; Servo control output port bit definitions (active high)
-#define  SRV1OUT   OUTPORT,0
-#define  SRV2OUT   OUTPORT,1
-#define  SRV3OUT   OUTPORT,2
-#define  SRV4OUT   OUTPORT,3
+#define  SRV1OUT   PORTA,5
+#define  SRV2OUT   PORTC,5
+#define  SRV3OUT   PORTC,4
+#define  SRV4OUT   PORTC,3
 
 ; Interrupt interval for servo pulse cycle start, 20.096mSec (7,812.5Hz / 157)
-CYCLEINT    EQU    (255 - 157)
+CYCLEINT    EQU    (255 - 110)
 
 ; Interrupt interval for start portion of servo pulse , 1mSec (250KHz / 250)
 MINPULSEINT EQU    (255 - 250)
@@ -192,7 +210,7 @@ DIGITTEST   EQU    '0'      ; Test pattern for ASCII digit after applying mask
 ; Variable definitions                                                *
 ;**********************************************************************
 
-    CBLOCK  0x0020  ; General Purpose register data area
+    CBLOCK  0x0070  ; Access data area
 
 ; Status and accumulator storage registers
 w_isr                       ; W register (accumulator) store during ISR
@@ -210,6 +228,10 @@ freezeTime                  ; Ignore inputs for setting mode timeout
 temp1                       ; General purpose temporary register
 temp2                       ; General purpose temporary register
 temp3                       ; General purpose temporary register
+
+	ENDC
+
+	CBLOCK	0x002A	; General Purpose register data area
 
 numHundreds                 ; First ASCII digit of number
 numTens                     ; Second ASCII digit of number
@@ -286,50 +308,50 @@ srv4OnRate                  ; On speed
 	ORG     0x2100  ; EEPROM data area
 
 ; Servo 1
-    DE      MIDPOINT        ; Off position
-    DE      MIDPOINT        ; Off position first bounce
-    DE      MIDPOINT        ; Off position second bounce
-    DE      MIDPOINT        ; Off position third bounce
-    DE      MIDPOINT        ; On position
-    DE      MIDPOINT        ; On position first bounce
-    DE      MIDPOINT        ; On position second bounce
-    DE      MIDPOINT        ; On position third bounce
+    DE      MIDPOINT + 20   ; Off position
+    DE      MIDPOINT + 10   ; Off position first bounce
+    DE      MIDPOINT + 15   ; Off position second bounce
+    DE      MIDPOINT + 18   ; Off position third bounce
+    DE      MIDPOINT - 20   ; On position
+    DE      MIDPOINT - 10   ; On position first bounce
+    DE      MIDPOINT - 15   ; On position second bounce
+    DE      MIDPOINT - 20   ; On position third bounce
     DE      MIDSPEED
     DE      MIDSPEED
 
 ; Servo 2
-    DE      MIDPOINT        ; Off position
-    DE      MIDPOINT        ; Off position first bounce
-    DE      MIDPOINT        ; Off position second bounce
-    DE      MIDPOINT        ; Off position third bounce
-    DE      MIDPOINT        ; On position
-    DE      MIDPOINT        ; On position first bounce
-    DE      MIDPOINT        ; On position second bounce
-    DE      MIDPOINT        ; On position third bounce
+    DE      MIDPOINT + 20   ; Off position
+    DE      MIDPOINT + 10   ; Off position first bounce
+    DE      MIDPOINT + 15   ; Off position second bounce
+    DE      MIDPOINT + 18   ; Off position third bounce
+    DE      MIDPOINT - 20   ; On position
+    DE      MIDPOINT - 10   ; On position first bounce
+    DE      MIDPOINT - 15   ; On position second bounce
+    DE      MIDPOINT - 20   ; On position third bounce
     DE      MIDSPEED
     DE      MIDSPEED
 
 ; Servo 3
-    DE      MIDPOINT        ; Off position
-    DE      MIDPOINT        ; Off position first bounce
-    DE      MIDPOINT        ; Off position second bounce
-    DE      MIDPOINT        ; Off position third bounce
-    DE      MIDPOINT        ; On position
-    DE      MIDPOINT        ; On position first bounce
-    DE      MIDPOINT        ; On position second bounce
-    DE      MIDPOINT        ; On position third bounce
+    DE      MIDPOINT + 20   ; Off position
+    DE      MIDPOINT + 10   ; Off position first bounce
+    DE      MIDPOINT + 15   ; Off position second bounce
+    DE      MIDPOINT + 18   ; Off position third bounce
+    DE      MIDPOINT - 20   ; On position
+    DE      MIDPOINT - 10   ; On position first bounce
+    DE      MIDPOINT - 15   ; On position second bounce
+    DE      MIDPOINT - 20   ; On position third bounce
     DE      MIDSPEED
     DE      MIDSPEED
 
 ; Servo 4
-    DE      MIDPOINT        ; Off position
-    DE      MIDPOINT        ; Off position first bounce
-    DE      MIDPOINT        ; Off position second bounce
-    DE      MIDPOINT        ; Off position third bounce
-    DE      MIDPOINT        ; On position
-    DE      MIDPOINT        ; On position first bounce
-    DE      MIDPOINT        ; On position second bounce
-    DE      MIDPOINT        ; On position third bounce
+    DE      MIDPOINT + 20   ; Off position
+    DE      MIDPOINT + 10   ; Off position first bounce
+    DE      MIDPOINT + 15   ; Off position second bounce
+    DE      MIDPOINT + 18   ; Off position third bounce
+    DE      MIDPOINT - 20   ; On position
+    DE      MIDPOINT - 10   ; On position first bounce
+    DE      MIDPOINT - 15   ; On position second bounce
+    DE      MIDPOINT - 20   ; On position third bounce
     DE      MIDSPEED
     DE      MIDSPEED
 
@@ -606,6 +628,10 @@ settingOffsetTable
 initialise
     BANKSEL REGBANK1        ; Ensure register page 1 is selected
 
+    ; Deselect analogue input
+    clrf   ANSEL
+    clrf   ADCON0
+
     ; Configure input port
     movlw   PORTADIR
     movwf   TRISA
@@ -616,15 +642,15 @@ initialise
     movlw   PORTCDIR
     movwf   TRISC
 
-    ; Set internal oscillator calibration
-    call    GETOSCCAL
-    movwf   OSCCAL
+    ; Set 4MHz internal oscillator
+    movlw   0x60
+    movwf   OSCCON
 
     BANKSEL REGBANK0        ; Ensure register page 0 is selected
 
     ; Turn comparator off
     movlw   B'00000111'
-    movwf   CMCON
+    movwf   CMCON0
 
 loadAllSettings
     clrf    freezeTime      ; Expire setting mode timeout
