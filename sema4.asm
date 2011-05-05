@@ -95,6 +95,9 @@
 ;       Pulse interval timed by timer0.                               *
 ;       Pulse duration timed by timer1.                               *
 ;                                                                     *
+;     5 May 2011 - Chris White:                                       *
+;       Pulse duration by timer1 at 1MHz, finer movement increments.  *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
@@ -208,13 +211,14 @@ CYCLEINT    EQU    (0xFF - 156)
 
 ; Interrupt interval for start portion of servo pulse , 1mSec (250 @ 250KHz)
 ; Allow for instruction cycles within interrupt from pulse on to off
-PULSEINT    EQU    ((0xFFFF - 250) + 17)
+; Value will be scaled at use as clock is actually 1MHz rather than 250KHz
+PULSEINT    EQU    (250 - 19)
 
 ; Options register values to select fast or slow interrupt timing
 ;**********************************************************************
 
-TMR1OPTIONS EQU    B'00100000' ; Options: TMR1 Gate disabled,
-                               ;          TMR1 prescale, 1:4 (250KHz)
+TMR1OPTIONS EQU    B'00000000' ; Options: TMR1 Gate disabled,
+                               ;          TMR1 prescale, 1:1 (1MHz)
                                ;          TMR1 from CLKOUT (1MHz),
 
 TMR0OPTIONS EQU    B'00000110' ; Options: PORTA pull-ups enabled,
@@ -533,12 +537,6 @@ runCycle
 
     bcf     PIR1,TMR1IF     ; Clear the timer1 interrupt bitflag
 
-    movlw   high PULSEINT   ; Initialise high byte ...
-    movwf   TMR1H           ; ... of timer1
-
-    movlw   low PULSEINT    ; Initialise low byte ...
-    movwf   TMR1L           ; ... of timer1
-
     SetPCLATH cycleStateTable
     movf    cycleState,W    ; Use cycle state value ...
     addwf   PCL,F           ; ... as index for code jump
@@ -556,35 +554,70 @@ cycleStateTable
 #endif
 
 startPulse
-    subwf   TMR1L,F         ; Adjust low byte of timer1 to add position time
-    btfss   STATUS,C        ; Skip if no borrow from low byte ...
-    decf    TMR1H,F         ; ... else adjust timer1 high byte
+    movwf   TMR1L           ; Set low byte of timer1 for position part of pulse
+
+    movlw   low PULSEINT
+    subwf   TMR1L,F         ; Adjust low byte of timer1 to add pulse start
+
+    ; Duration of position part of pulse x 4 forms first ten bits of timer1
+    ; Puts upper two bits of duration low byte into timer
+    ; Also adjust timer1 high byte for any borrow from low byte subtraction
+    rlf     TMR1H,F
+    rlf     TMR1L,F
+    rlf     TMR1H,F
+    rlf     TMR1L,F
+    rlf     TMR1H,F
+
     bsf     T1CON,TMR1ON    ; Start timer1 running
     incf    cycleState,F    ; Advance to next state
     goto    endISR
 
 srv1Pulse
+    movf    srv1NowL,W      ; Get low byte of duration for position ...
+    iorlw   B'00111111'     ; ... set all but upper two bits ...
+    movwf   TMR1H           ; ... and save in high byte of timer1
+
     movf    srv1NowH,W      ; Get duration for position part of pulse
+
     btfsc   inpVal,SRV1DRV  ; Skip if servo 1 drive is disabled ...
     bsf     SRV1OUT         ; ... else start servo 1 pulse
+
     goto    startPulse
 
 srv2Pulse
-    movf    srv2NowH,W      ; Set duration for position part of pulse
+    movf    srv2NowL,W      ; Get low byte of duration for position ...
+    iorlw   B'00111111'     ; ... set all but upper two bits ...
+    movwf   TMR1H           ; ... and save in high byte of timer1
+
+    movf    srv2NowH,W      ; Get duration for position part of pulse
+
     btfsc   inpVal,SRV2DRV  ; Skip if servo 2 drive is disabled ...
     bsf     SRV2OUT         ; ... else start servo 2 pulse
+
     goto    startPulse
 
 srv3Pulse
-    movf    srv3NowH,W      ; Set duration for position part of pulse
+    movf    srv3NowL,W      ; Get low byte of duration for position ...
+    iorlw   B'00111111'     ; ... set all but upper two bits ...
+    movwf   TMR1H           ; ... and save in high byte of timer1
+
+    movf    srv3NowH,W      ; Get duration for position part of pulse
+
     btfsc   inpVal,SRV3DRV  ; Skip if servo 3 drive is disabled ...
     bsf     SRV3OUT         ; ... else start servo 3 pulse
+
     goto    startPulse
 
 srv4Pulse
-    movf    srv4NowH,W      ; Set duration for position part of pulse
+    movf    srv4NowL,W      ; Get low byte of duration for position ...
+    iorlw   B'00111111'     ; ... set all but upper two bits ...
+    movwf   TMR1H           ; ... and save in high byte of timer1
+
+    movf    srv4NowH,W      ; Get duration for position part of pulse
+
     btfsc   inpVal,SRV4DRV  ; Skip if servo 4 drive is disabled ...
     bsf     SRV4OUT         ; ... else start servo 4 pulse
+
     goto    startPulse
 
 cycleEnd
@@ -1131,28 +1164,28 @@ commandTable
     ;******************************************************************
 
 srv1SetOffPosition
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv1Off1        ; ... as ...
     movwf   srv1Off2        ; ... servo ...
     movwf   srv1Off3        ; ... Off bounce positions (Servo4 compatabillity)
 
 srv1SetOffOnly
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv1Off         ; ... as servo Off position
     goto    received1OffPosition
 
 srv1SetOff1Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv1Off1        ; ... as servo Off bounce 1 position
     goto    received1OffPosition
 
 srv1SetOff2Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv1Off2        ; ... as servo Off bounce 2 position
     goto    received1OffPosition
 
 srv1SetOff3Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv1Off3        ; ... as servo Off bounce 3 position
 
 received1OffPosition
@@ -1163,28 +1196,28 @@ received1OffPosition
     goto    receivedSetting
 
 srv1SetOnPosition
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv1On1         ; ... as ...
     movwf   srv1On2         ; ... servo ...
     movwf   srv1On3         ; ... On bounce positions (Servo4 compatabillity)
 
 srv1SetOnOnly
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv1On          ; ... as servo On position
     goto    received1OnPosition
 
 srv1SetOn1Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv1On1         ; ... as servo On bounce 1 position
     goto    received1OnPosition
 
 srv1SetOn2Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv1On2         ; ... as servo On bounce 2 position
     goto    received1OnPosition
 
 srv1SetOn3Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv1On3         ; ... as servo On bounce 3 position
 
 received1OnPosition
@@ -1210,28 +1243,28 @@ srv1SetOnRate
     goto    receivedRate
 
 srv2SetOffPosition
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv2Off1        ; ... as ...
     movwf   srv2Off2        ; ... servo ...
     movwf   srv2Off3        ; ... Off bounce positions (Servo4 compatabillity)
 
 srv2SetOffOnly
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv2Off         ; ... as servo Off position
     goto    received2OffPosition
 
 srv2SetOff1Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv2Off1        ; ... as servo Off bounce 1 position
     goto    received2OffPosition
 
 srv2SetOff2Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv2Off2        ; ... as servo Off bounce 2 position
     goto    received2OffPosition
 
 srv2SetOff3Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv2Off3        ; ... as servo Off bounce 3 position
 
 received2OffPosition
@@ -1242,28 +1275,28 @@ received2OffPosition
     goto    receivedSetting
 
 srv2SetOnPosition
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv2On1         ; ... as ...
     movwf   srv2On2         ; ... servo ...
     movwf   srv2On3         ; ... On bounce positions (Servo4 compatabillity)
 
 srv2SetOnOnly
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv2On          ; ... as servo On position
     goto    received2OnPosition
 
 srv2SetOn1Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv2On1         ; ... as servo On bounce 1 position
     goto    received2OnPosition
 
 srv2SetOn2Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv2On2         ; ... as servo On bounce 2 position
     goto    received2OnPosition
 
 srv2SetOn3Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv2On3         ; ... as servo On bounce 3 position
 
 received2OnPosition
@@ -1289,28 +1322,28 @@ srv2SetOnRate
     goto    receivedRate
 
 srv3SetOffPosition
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv3Off1        ; ... as ...
     movwf   srv3Off2        ; ... servo ...
     movwf   srv3Off3        ; ... Off bounce positions (Servo4 compatabillity)
 
 srv3SetOffOnly
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv3Off         ; ... as servo Off position
     goto    received3OffPosition
 
 srv3SetOff1Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv3Off1        ; ... as servo Off bounce 1 position
     goto    received3OffPosition
 
 srv3SetOff2Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv3Off2        ; ... as servo Off bounce 2 position
     goto    received3OffPosition
 
 srv3SetOff3Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv3Off3        ; ... as servo Off bounce 3 position
 
 received3OffPosition
@@ -1321,28 +1354,28 @@ received3OffPosition
     goto    receivedSetting
 
 srv3SetOnPosition
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv3On1         ; ... as ...
     movwf   srv3On2         ; ... servo ...
     movwf   srv3On3         ; ... On bounce positions (Servo4 compatabillity)
 
 srv3SetOnOnly
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv3On          ; ... as servo On position
     goto    received3OnPosition
 
 srv3SetOn1Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv3On1         ; ... as servo On bounce 1 position
     goto    received3OnPosition
 
 srv3SetOn2Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv3On2         ; ... as servo On bounce 2 position
     goto    received3OnPosition
 
 srv3SetOn3Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv3On3         ; ... as servo On bounce 3 position
 
 received3OnPosition
@@ -1368,28 +1401,28 @@ srv3SetOnRate
     goto    receivedRate
 
 srv4SetOffPosition
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv4Off1        ; ... as ...
     movwf   srv4Off2        ; ... servo ...
     movwf   srv4Off3        ; ... Off bounce positions (Servo4 compatabillity)
 
 srv4SetOffOnly
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv4Off         ; ... as servo Off position
     goto    received4OffPosition
 
 srv4SetOff1Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv4Off1        ; ... as servo Off bounce 1 position
     goto    received4OffPosition
 
 srv4SetOff2Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv4Off2        ; ... as servo Off bounce 2 position
     goto    received4OffPosition
 
 srv4SetOff3Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv4Off3        ; ... as servo Off bounce 3 position
 
 received4OffPosition
@@ -1400,28 +1433,28 @@ received4OffPosition
     goto    receivedSetting
 
 srv4SetOnPosition
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv4On1         ; ... as ...
     movwf   srv4On2         ; ... servo ...
     movwf   srv4On3         ; ... On bounce positions (Servo4 compatabillity)
 
 srv4SetOnOnly
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv4On          ; ... as servo On position
     goto    received4OnPosition
 
 srv4SetOn1Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv4On1         ; ... as servo On bounce 1 position
     goto    received4OnPosition
 
 srv4SetOn2Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv4On2         ; ... as servo On bounce 2 position
     goto    received4OnPosition
 
 srv4SetOn3Position
-    comf    temp3,W         ; Store received value ...
+    movf    temp3,W         ; Store received value ...
     movwf   srv4On3         ; ... as servo On bounce 3 position
 
 received4OnPosition
