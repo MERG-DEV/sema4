@@ -98,6 +98,9 @@
 ;     5 May 2011 - Chris White:                                       *
 ;       Pulse duration by timer1 at 1MHz, finer movement increments.  *
 ;                                                                     *
+;     5 May 2011 - Chris White:                                       *
+;       Optional 0.5mSec to 2.5mSec pulse for extended travel servos. *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
@@ -191,6 +194,12 @@ PORTCDIR    EQU    B'00100000' ; All bits outputs except 5 (Drive Shutoff)
 #define  SRV3OUT   OUTPORT,2
 #define  SRV4OUT   OUTPORT,3
 
+; Servo extended travel bit definitions
+#define  SRV1XTND  sysFlags,0
+#define  SRV2XTND  sysFlags,1
+#define  SRV3XTND  sysFlags,2
+#define  SRV4XTND  sysFlags,3
+
 ; Serial RX input port bit definition
 #define  SERRXIN   PORTA,2
 
@@ -210,9 +219,8 @@ TIMEDRIVE   EQU    60          ; Number of cycles before drive shutoff
 CYCLEINT    EQU    (0xFF - 156)
 
 ; Interrupt interval for start portion of servo pulse , 1mSec (250 @ 250KHz)
-; Allow for instruction cycles within interrupt from pulse on to off
 ; Value will be scaled at use as clock is actually 1MHz rather than 250KHz
-PULSEINT    EQU    (250 - 19)
+PULSEINT    EQU    250
 
 ; Options register values to select fast or slow interrupt timing
 ;**********************************************************************
@@ -313,8 +321,13 @@ inpVal                      ; Servo control flags (all active high)
 freezeTime                  ; Ignore inputs for setting mode timeout
 
 sysFlags                    ; System status flags (all active high)
-                            ;  bit 7 - Settings and EEPROM in synch indicator
-                            ;  bit 6 - New Rx data received indicator
+                            ;  bit    7 - Settings and EEPROM synched indicator
+                            ;  bit    6 - New Rx data received indicator
+                            ;  bits 4,5 - Unused
+                            ;  bit    3 - Servo 4 extended travel selected
+                            ;  bit    2 - Servo 3 extended travel selected
+                            ;  bit    1 - Servo 2 extended travel selected
+                            ;  bit    0 - Servo 1 extended travel selected
 
 ; Servo current positions
 ;**********************************************************************
@@ -466,6 +479,11 @@ eeDataStart
     DE      MIDRATE
     DE      MIDRATE
 
+; Servo extended travel selections
+;**********************************************************************
+
+    DE      0
+
 ; Number of settings to load/save from/to EEPROM
 NUMSETTINGS EQU ($ - eeDataStart)
 
@@ -553,20 +571,48 @@ cycleStateTable
     error "Interrupt cycle state jump table spans 8 bit boundary"
 #endif
 
-startPulse
+xtndPulse
+    movwf   TMR1L           ; Load low byte of timer1 with position high byte
+
+    ; Duration of position part of pulse x 8 forms first eleven bits of timer1
+    ; Puts upper two bits of duration low byte into timer
+    bsf     STATUS,C        ; Ensure 1 shifted into timer1 high byte
+    rlf     TMR1H,F         ; Rotate timer1 <- 1, carry <- position bit 7
+    rlf     TMR1L,F         ; Rotate timer1 <- position bit 7, carry <- bit 15
+    rlf     TMR1H,F         ; Rotate timer1 <- position bit 15, carry <- bit 6
+    rlf     TMR1L,F         ; Rotate timer1 <- position bit 6, carry <- bit 14
+    rlf     TMR1H,F         ; Rotate timer1 <- position bit 14
+    bcf     STATUS,C        ; Ensure 0 shifted into timer1 high byte
+    rlf     TMR1L,F         ; Rotate timer1 <- 0, carry <- bit 13
+    rlf     TMR1H,F         ; Rotate position bit 13
+
+    ; Pulse start interval adjusted for cycles in interrupt from on to off
+    movlw   low ((PULSEINT - 50) * 2)
+    subwf   TMR1L,F         ; Add pulse start time to low byte of timer1
+    btfss   STATUS,C        ; Skip if no borrow from low byte subtraction ...
+    decf    TMR1H,F         ; ... else adjust timer1 high byte
+    movlw   high ((PULSEINT - 50) * 2)
+    subwf   TMR1H,F         ; Add pulse start time to low byte of timer1
+
+    bsf     T1CON,TMR1ON    ; Start timer1 running
+    incf    cycleState,F    ; Advance to next state
+    goto    endISR
+
+nrmlPulse
     movwf   TMR1L           ; Set low byte of timer1 for position part of pulse
 
-    movlw   low PULSEINT
-    subwf   TMR1L,F         ; Adjust low byte of timer1 to add pulse start
+    ; Pulse start interval adjusted for cycles in interrupt from on to off
+    movlw   (PULSEINT - 19)
+    subwf   TMR1L,F         ; Add pulse start time to low byte of timer1
 
     ; Duration of position part of pulse x 4 forms first ten bits of timer1
     ; Puts upper two bits of duration low byte into timer
     ; Also adjust timer1 high byte for any borrow from low byte subtraction
-    rlf     TMR1H,F
-    rlf     TMR1L,F
-    rlf     TMR1H,F
-    rlf     TMR1L,F
-    rlf     TMR1H,F
+    rlf     TMR1H,F         ; Rotate timer1 <- borrow, carry <- position bit 7
+    rlf     TMR1L,F         ; Rotate timer1 <- position bit 7, carry <- bit 15
+    rlf     TMR1H,F         ; Rotate timer1 <- position bit 15, carry <- bit 6
+    rlf     TMR1L,F         ; Rotate timer1 <- position bit 6, carry <- bit 14
+    rlf     TMR1H,F         ; Rotate timer1 <- position bit 14
 
     bsf     T1CON,TMR1ON    ; Start timer1 running
     incf    cycleState,F    ; Advance to next state
@@ -574,7 +620,7 @@ startPulse
 
 srv1Pulse
     movf    srv1NowL,W      ; Get low byte of duration for position ...
-    iorlw   B'00111111'     ; ... set all but upper two bits ...
+    iorlw   B'00111111'     ; ... mask all but upper two bits ...
     movwf   TMR1H           ; ... and save in high byte of timer1
 
     movf    srv1NowH,W      ; Get duration for position part of pulse
@@ -582,11 +628,13 @@ srv1Pulse
     btfsc   inpVal,SRV1DRV  ; Skip if servo 1 drive is disabled ...
     bsf     SRV1OUT         ; ... else start servo 1 pulse
 
-    goto    startPulse
+    btfss   SRV1XTND        ; Skip if servo 1 extended travel is selected
+    goto    nrmlPulse
+    goto    xtndPulse
 
 srv2Pulse
     movf    srv2NowL,W      ; Get low byte of duration for position ...
-    iorlw   B'00111111'     ; ... set all but upper two bits ...
+    iorlw   B'00111111'     ; ... mask all but upper two bits ...
     movwf   TMR1H           ; ... and save in high byte of timer1
 
     movf    srv2NowH,W      ; Get duration for position part of pulse
@@ -594,11 +642,13 @@ srv2Pulse
     btfsc   inpVal,SRV2DRV  ; Skip if servo 2 drive is disabled ...
     bsf     SRV2OUT         ; ... else start servo 2 pulse
 
-    goto    startPulse
+    btfss   SRV2XTND        ; Skip if servo 2 extended travel is selected
+    goto    nrmlPulse
+    goto    xtndPulse
 
 srv3Pulse
     movf    srv3NowL,W      ; Get low byte of duration for position ...
-    iorlw   B'00111111'     ; ... set all but upper two bits ...
+    iorlw   B'00111111'     ; ... mask all but upper two bits ...
     movwf   TMR1H           ; ... and save in high byte of timer1
 
     movf    srv3NowH,W      ; Get duration for position part of pulse
@@ -606,11 +656,13 @@ srv3Pulse
     btfsc   inpVal,SRV3DRV  ; Skip if servo 3 drive is disabled ...
     bsf     SRV3OUT         ; ... else start servo 3 pulse
 
-    goto    startPulse
+    btfss   SRV3XTND        ; Skip if servo 3 extended travel is selected
+    goto    nrmlPulse
+    goto    xtndPulse
 
 srv4Pulse
     movf    srv4NowL,W      ; Get low byte of duration for position ...
-    iorlw   B'00111111'     ; ... set all but upper two bits ...
+    iorlw   B'00111111'     ; ... mask all but upper two bits ...
     movwf   TMR1H           ; ... and save in high byte of timer1
 
     movf    srv4NowH,W      ; Get duration for position part of pulse
@@ -618,7 +670,9 @@ srv4Pulse
     btfsc   inpVal,SRV4DRV  ; Skip if servo 4 drive is disabled ...
     bsf     SRV4OUT         ; ... else start servo 4 pulse
 
-    goto    startPulse
+    btfss   SRV4XTND        ; Skip if servo 4 extended travel is selected
+    goto    nrmlPulse
+    goto    xtndPulse
 
 cycleEnd
     clrf    cycleState      ; End of cycle, reset cycle state
@@ -681,14 +735,15 @@ waitReadEE
 ; Load settings from EEPROM subroutine                                 *
 ;**********************************************************************
 loadAllSettings
-    bsf     SYNCEDIND       ; Set servo settings synchronised indicator
-    clrf    freezeTime      ; Clear setting mode timeout (read physical inputs)
+    movlw   (NUMSETTINGS - 1)
+    movwf   temp1           ; Set index of settings to be read from EEPROM
+
+    call    readEEPROM
+
+    movwf   sysFlags        ; Load system flags with value read from EEPROM
 
     movlw   srv4OnRate      ; Load end address of servo settings ...
     movwf   FSR             ; ... into indirect addressing register
-
-    movlw   NUMSETTINGS
-    movwf   temp1           ; Set count of settings to be read from EEPROM
 
 loadSetting
     decf    temp1,W         ; Set index into EEPROM from count
@@ -699,6 +754,9 @@ loadSetting
     decf    FSR,F           ; Decrement to address of next setting
     decfsz  temp1,F         ; Decrement settings count, skip if zero ...
     goto    loadSetting     ; ... else loop until all settings have been read
+
+    bsf     SYNCEDIND       ; Set servo settings synchronised indicator
+    clrf    freezeTime      ; Clear setting mode timeout (read physical inputs)
 
     return
 
@@ -1112,7 +1170,7 @@ commandTable
     goto    srv4SetOffRate
     goto    srv4SetOnRate
 
-    ; Additional Sema4 commands
+    ; Additional Sema4b commands
     ;******************************************************************
 
     goto    srv1SetOff1Position
@@ -1155,6 +1213,11 @@ commandTable
     goto    srv3NewOnRate
     goto    srv4NewOffRate
     goto    srv4NewOnRate
+
+    ; Additional Sema4c commands
+    ;******************************************************************
+
+    goto    receivedXtnd
 
 #if (high commandTable) != (high $)
     error "Received command jump table spans 8 bit boundary"
@@ -1499,6 +1562,18 @@ receivedSetting
 
     goto    syncSerRx       ; Loop looking for more serial data
 
+    ; Received servo extended travel selections
+    ;******************************************************************
+
+receivedXtnd
+    movf    temp3,W         ; Get received extended travel selections
+    iorlw   0xF0            ; Prevent system status indicators getting cleared
+    andwf   sysFlags,F      ; Clear extended travel de-selections
+    andlw   0x0F            ; Isolate received extended travel selections
+    iorwf   sysFlags,F      ; Set extended travel selections
+
+    goto    syncSerRx       ; Loop looking for more serial data
+
     ; Actions for commands other than position or rate setting
     ;******************************************************************
 
@@ -1523,8 +1598,15 @@ receivedStore
     ; Store settings to EEPROM
     ;******************************************************************
 
-    movlw   NUMSETTINGS
-    movwf   temp1           ; Set count of settings to be read from EEPROM
+    movlw   (NUMSETTINGS - 1)
+    movwf   temp1           ; Set index of settings to write to EEPROM
+
+    movf    sysFlags,W      ; Get system flags ...
+    andlw   0x0F            ; ... isolate servo extended travel selections ...
+    movwf   temp2           ; ... and save as EEPROM write value
+
+    call    writeEEPROM
+
     movlw   srv4OnRate      ; Load end address of servo settings ...
     movwf   FSR             ; ... into indirect addressing register
 
@@ -1532,7 +1614,7 @@ storeSetting
     movf    INDF,W          ; Get setting value ...
     movwf   temp2           ; ... and save as EEPROM write value
 
-    decf    temp1,W         ; Set index into EEPROM from count
+    decf    temp1,W         ; Next EEPROM index
     call    writeEEPROM
 
     decf    FSR,F           ; Decrement to address of next setting
