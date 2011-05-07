@@ -157,9 +157,9 @@ RAMSTART    EQU    0x0020      ; General Purpose register data area
 
 EESTART     EQU    0x2100      ; EEPROM data area
 
-PROGSTART   EQU    0           ; Processor reset vector
+BOOTVECTOR  EQU    0           ; Processor reset vector
 
-ISRSTART    EQU    0x0004      ; Interrupt vector location
+INTVECTOR   EQU    0x0004      ; Interrupt vector location
 
 ; I/O port and bit definitions
 ;**********************************************************************
@@ -449,48 +449,48 @@ eeDataStart
     DE      (MIDPOINT - 15) ; On position first bounce
     DE      (MIDPOINT - 10) ; On position second bounce
     DE      (MIDPOINT -  5) ; On position third bounce
-    DE      MINRATE
-    DE      MINRATE
+    DE      MIDRATE
+    DE      MIDRATE
 
 ; Servo 2 position and rate settings
 ;**********************************************************************
 
-    DE      MAXPOINT        ; Off position
-    DE      MAXPOINT        ; Off position first bounce
-    DE      MAXPOINT        ; Off position second bounce
-    DE      MAXPOINT        ; Off position third bounce
-    DE      MINPOINT        ; On position
-    DE      MINPOINT        ; On position first bounce
-    DE      MINPOINT        ; On position second bounce
-    DE      MINPOINT        ; On position third bounce
+    DE      (MIDPOINT - 20) ; Off position
+    DE      (MIDPOINT -  5) ; Off position first bounce
+    DE      (MIDPOINT - 10) ; Off position second bounce
+    DE      (MIDPOINT - 15) ; Off position third bounce
+    DE      MIDPOINT        ; On position
+    DE      (MIDPOINT - 15) ; On position first bounce
+    DE      (MIDPOINT - 10) ; On position second bounce
+    DE      (MIDPOINT -  5) ; On position third bounce
     DE      MIDRATE
     DE      MIDRATE
 
 ; Servo 3 position and rate settings
 ;**********************************************************************
 
-    DE      MINPOINT        ; Off position
-    DE      MINPOINT        ; Off position first bounce
-    DE      MINPOINT        ; Off position second bounce
-    DE      MINPOINT        ; Off position third bounce
-    DE      MAXPOINT        ; On position
-    DE      MAXPOINT        ; On position first bounce
-    DE      MAXPOINT        ; On position second bounce
-    DE      MAXPOINT        ; On position third bounce
+    DE      (MIDPOINT - 20) ; Off position
+    DE      (MIDPOINT -  5) ; Off position first bounce
+    DE      (MIDPOINT - 10) ; Off position second bounce
+    DE      (MIDPOINT - 15) ; Off position third bounce
+    DE      MIDPOINT        ; On position
+    DE      (MIDPOINT - 15) ; On position first bounce
+    DE      (MIDPOINT - 10) ; On position second bounce
+    DE      (MIDPOINT -  5) ; On position third bounce
     DE      MIDRATE
     DE      MIDRATE
 
 ; Servo 4 position and rate settings
 ;**********************************************************************
 
-    DE      MIDPOINT        ; Off position
-    DE      MIDPOINT        ; Off position first bounce
-    DE      MIDPOINT        ; Off position second bounce
-    DE      MIDPOINT        ; Off position third bounce
+    DE      (MIDPOINT - 20) ; Off position
+    DE      (MIDPOINT -  5) ; Off position first bounce
+    DE      (MIDPOINT - 10) ; Off position second bounce
+    DE      (MIDPOINT - 15) ; Off position third bounce
     DE      MIDPOINT        ; On position
-    DE      MIDPOINT        ; On position first bounce
-    DE      MIDPOINT        ; On position second bounce
-    DE      MIDPOINT        ; On position third bounce
+    DE      (MIDPOINT - 15) ; On position first bounce
+    DE      (MIDPOINT - 10) ; On position second bounce
+    DE      (MIDPOINT -  5) ; On position third bounce
     DE      MIDRATE
     DE      MIDRATE
 
@@ -518,7 +518,7 @@ SetPCLATH  macro    codeLabel
 ; Reset vector                                                        *
 ;**********************************************************************
 
-    ORG     PROGSTART       ; Processor reset vector
+    ORG     BOOTVECTOR      ; Processor reset vector
 
 bootVector
     clrf    INTCON          ; Disable interrupts
@@ -530,7 +530,7 @@ bootVector
 ; Interrupt service routine (ISR) code                                *
 ;**********************************************************************
 
-    ORG     ISRSTART        ; Interrupt vector
+    ORG     INTVECTOR       ; Interrupt vector
 
 beginISR
     movwf   w_isr           ; Save off current W register contents
@@ -575,12 +575,59 @@ cycleStateTable
     error "Interrupt cycle state jump table spans 8 bit boundary"
 #endif
 
+; Duration of servo pulses are timed using timer1. This is a 16 bit counter
+; configured to increment and generate an interrupt on roll over from
+; hexadecimal FFFF to 0000. This allows a range of counts from hexadecimal 1
+; to 10000, or as decimal 0 to 65536.
+;
+; The timer is configured to increment from the instruction cycle clock which
+; is the oscillator divided by 4, so with 4MHz oscillator this gives a tick
+; rate of 1MHz (each tick = 1uSec).
+;
+; Position settings are 8 bit numbers giving a range of hexadecimal FF to 00,
+; or decimal 255 to 0. This gives a range of intervals from 255 to 0 uSecs
+; (0.255 to 0 mSecs).
+;
+; Multiplying the position setting by 4 gives a range of hexadecimal 3FC to
+; 000, or decimal 1020 to 0, a range of intervals from 1020 to 0 uSecs (1.02
+; to 0 mSecs).
+;
+; Multiplying the position setting by 8 gives a range of hexadecimal 7F8 to
+; 000, or decimal 2040 to 0, a range of intervals from 2040 to 0 uSecs (2.04
+; to 0 mSecs).
+;
+; As the timer counter increments from hexadecimal 0 to overflow at 10000 to
+; set the number of ticks for a position value it should be subtracted from
+; hexadecimal 1000. However it's quicker and simpler to pad the value with
+; leading zeros and use it directly.
+;
+; Position value 255:
+;  0xFF -> 0xFFFF, x4 = 0xFFFC giving 0x1000 - 0xFFFC = 4 uSecs (0.004 mSecs)
+;  0xFF -> 0xFFFF, x8 = 0xFFF8 giving 0x1000 - 0xFFF8 = 8 uSecs (0.008 mSecs)
+;
+; Position value 0:
+;  0x0 -> 0xFF00, x4 = 0xFC00 giving 0x1000 - 0xFC00 = 1024 uSecs (1.024 mSecs)
+;  0x0 -> 0xFF00, x8 = 0xF800 giving 0x1000 - 0xF800 = 2048 uSecs (2.048 mSecs)
+;
+; In practise although the position setpoints are 8 bit values the current are
+; 12 bit values allowing a more fine grained movement of the servos.
+;
+; Lastly the fixed starting portion of the pulse can be added by simply
+; subtracting a fixed amount from the value loaded into the timer counter,
+; this causing more ticks to be needed before the counter overflows.
+; Subtracting decimal 1000 adds 1000 uSecs (1 mSec), subtracting 500 adds
+; 500 uSecs (0.5 mSec)
+
+    ; Produce a pulse between 0.5 and 2.5 mSec
+    ;******************************************************************
+
 xtndPulse
     iorlw   B'00011111'     ; Mask all but duration low byte top three bits ...
     movwf   TMR1H           ; ... and save in high byte of timer1
 
     ; Duration of position part of pulse x 8 forms first eleven bits of timer1
     ; Puts upper three bits of position duration low byte into timer
+    ; Results in a pulse length between 0.008 and 2.048 mSecs
     bsf     STATUS,C        ; Ensure 1 shifted into timer1 high byte
     rlf     TMR1H,F         ; Rotate timer1H <- 1, carry <- position bit 7
     rlf     TMR1L,F         ; Rotate timer1L <- position bit 7, carry <- bit 15
@@ -590,7 +637,8 @@ xtndPulse
     rlf     TMR1L,F         ; Rotate timer1L <- position bit 5, carry <- bit 13
     rlf     TMR1H,F         ; Rotate timer1H <- position bit 13, carry <- bit 4
 
-    ; Pulse start interval adjusted for cycles in interrupt from on to off
+    ; Subtract fixed amount, adjusted for cycles in interrupt from on to off,
+    ; to lengthen pulse by 0.5 mSec to give between 0.508 and 2.548 mSecs
     movlw   low ((PULSEINT - 50) * 2)
     subwf   TMR1L,F         ; Add pulse start time to low byte of timer1
     btfss   STATUS,C        ; Skip if no borrow from low byte subtraction ...
@@ -600,17 +648,22 @@ xtndPulse
 
     goto    endPulse
 
+    ; Produce a pulse between 1 and 2 mSec
+    ;******************************************************************
+
 nrmlPulse
     iorlw   B'00111111'     ; Mask all but duration low byte top two bits ...
     movwf   TMR1H           ; ... and save in high byte of timer1
 
-    ; Pulse start interval adjusted for cycles in interrupt from on to off
+    ; Subtract fixed amount, adjusted for cycles in interrupt from on to off,
+    ; to lengthen pulse by 1 mSec (after multiplication by 4 below)
     movlw   (PULSEINT - 19)
     subwf   TMR1L,F         ; Add pulse start time to low byte of timer1
 
     ; Duration of position part of pulse x 4 forms first ten bits of timer1
     ; Puts upper two bits of position duration low byte into timer
     ; Also adjust timer1 high byte for any borrow from low byte subtraction
+    ; Results in a pulse length between 1.004 and 2.024 mSecs
     rlf     TMR1H,F         ; Rotate timer1H <- borrow, carry <- position bit 7
     rlf     TMR1L,F         ; Rotate timer1L <- position bit 7, carry <- bit 15
     rlf     TMR1H,F         ; Rotate timer1H <- position bit 15, carry <- bit 6
@@ -995,10 +1048,15 @@ initialise
     movlw   B'00000111'
     movwf   CMCON
 
-    clrf    OUTPORT         ; Turn off all outputs
+    clrf    OUTPORT
+    clrf    INPORT
+
     clrf    cycleState      ; Initialise cycle state
     movlw   DRVONMASK       ; Ensure all drive outputs ...
     iorwf   sysFlags,F      ; ... and other system flags clear
+
+    ; Delay an arbitray length of time to allow the inputs to settle
+    DelayLoop    temp1, 0xFF
 
     call    loadAllSettings ; Load all settings from EEPROM
 
