@@ -1,7 +1,7 @@
 [HEADER]
 magic_cookie={66E99B07-E706-4689-9E80-9B2582898A13}
 file_version=1.0
-device=PIC16F684
+device=PIC16F630
 [PATH_INFO]
 BuildDirPolicy=BuildDirIsProjectDir
 dir_src=
@@ -43,7 +43,7 @@ enable=0
 transport=0
 format=0
 [CUSTOM_BUILD]
-Pre-Build=cmd /d /c "del semabncr.hex"
+Pre-Build=cmd /d /c "del sema4bncr.hex"
 Pre-BuildEnabled=1
-Post-Build=cmd /d /c "copy sema4.hex semabncr.hex /v /y"
+Post-Build=cmd /d /c "copy sema4.hex sema4bncr.hex /v /y"
 Post-BuildEnabled=1
