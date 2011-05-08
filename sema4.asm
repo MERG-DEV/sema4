@@ -1,5 +1,5 @@
     title    "$Id$"
-    list     p=16F630
+    list     p=16F684
     radix    dec
 
 ;**********************************************************************
@@ -113,6 +113,9 @@
 ;       Ported 16F630 version of Sema4c to Bouncer hardware as per    *
 ;       version produced by Gordon Hopkins 29 Nov 2010.               *
 ;                                                                     *
+;     8 May 2011 - Chris White:                                       *
+;       Ported to 16F684.                                             *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                         +---+ +---+                                 *
@@ -135,9 +138,9 @@
 ; Include and configuration directives                                *
 ;**********************************************************************
 
-#include <p16f630.inc>
+#include <p16f684.inc>
 
-    __CONFIG   _CPD_OFF & _CP & _BODEN & _MCLRE_ON & _PWRTE_ON & _WDT_OFF & _INTRC_OSC_NOCLKOUT
+    __CONFIG   _CPD_OFF & _CP_ON & _BOD_ON & _MCLRE_ON & _PWRTE_ON & _WDT_OFF & _INTRC_OSC_NOCLKOUT
 
 ; '__CONFIG' directive is used to embed configuration data within .asm file.
 ; The lables following the directive are located in the respective .inc file.
@@ -158,9 +161,10 @@
 REGBANK0    EQU    0x00        ; Value used to select register bank 0
 REGBANK1    EQU    0x80        ; Value used to select register bank 1
 
-GETOSCCAL   EQU    0x3FF       ; Address of oscillator calibration value
+OSCSET      EQU    0x60        ; Internal 4MHz oscillator
 
-RAMSTART    EQU    0x0020      ; General Purpose register data area
+RAMSTART    EQU    0x002A      ; General Purpose register data area
+ACCESSRAM   EQU    0x0070      ; Register data area accessible from either bank
 
 EESTART     EQU    0x2100      ; EEPROM data area
 
@@ -306,7 +310,7 @@ COMMANDBASE EQU    'A'      ; Base character for first setting value
 ; Variable definitions                                                *
 ;**********************************************************************
 
-    CBLOCK  RAMSTART        ; General Purpose register data area
+    CBLOCK  ACCESSRAM       ; Register data area accessible from either bank
 
 ; ISR status and accumulator storage registers
 ;**********************************************************************
@@ -339,6 +343,10 @@ sysFlags                    ; System status flags (all active high)
                             ;  bit 2 - servo 3 drive enabled
                             ;  bit 1 - servo 2 drive enabled
                             ;  bit 0 - servo 1 drive enabled
+
+    ENDC
+
+    CBLOCK  RAMSTART        ; General Purpose register data area
 
 srvCtrl                     ; Servo control flags (all active high)
                             ;  bit 7 - Servo 4 extended travel selected
@@ -1058,14 +1066,18 @@ initialise
     movwf   TRISC
 
     ; Set internal oscillator calibration
-    call    GETOSCCAL
-    movwf   OSCCAL
+    movlw   OSCSET
+    movwf   OSCCON
+
+    ; Turn ADC off
+	clrf	ANSEL
+    clrf    ADCON0
 
     BANKSEL REGBANK0        ; Ensure register page 0 is selected
 
     ; Turn comparator off
     movlw   B'00000111'
-    movwf   CMCON
+    movwf   CMCON0
 
     clrf    PORTC
     clrf    PORTA
