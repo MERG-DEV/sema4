@@ -446,6 +446,11 @@ srv4State                   ; Servo 4 movement state
 
 eeDataStart
 
+; Servo extended travel selections
+;**********************************************************************
+
+    DE      0
+
 ; Servo 1 position and rate settings
 ;**********************************************************************
 
@@ -501,11 +506,6 @@ eeDataStart
     DE      (MIDPOINT -  5) ; On position third bounce
     DE      MIDRATE
     DE      MIDRATE
-
-; Servo extended travel selections
-;**********************************************************************
-
-    DE      0
 
 ; Number of settings to load/save from/to EEPROM
 NUMSETTINGS EQU ($ - eeDataStart)
