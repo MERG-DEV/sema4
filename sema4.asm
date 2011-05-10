@@ -109,6 +109,14 @@
 ;       Added output indicating completion of movement for servo1,    *
 ;       repeats state of input but only once movement completed.      *
 ;                                                                     *
+;    10 May 2011 - Chris White:                                       *
+;       Modified output cycle to skip completely the pulse for servo  *
+;       if its output is disabled (drive shut off).                   *
+;       Set rates initalised in EEPROM to 16 as MIDRATE was a bit too *
+;       fast.                                                         *
+;       Reduced input skip timeout after receiving a position setting *
+;       to about one second.                                          *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
@@ -227,7 +235,7 @@ RS232BITS   EQU    B'01111111' ; RS232 8 data bits (right shifted into carry)
 RXBITTIME   EQU    104         ; Delay count for 1 serial bit
 RXSTARTTIME EQU    156         ; Delay count for 1.5 serial bits
 
-TIMEFREEZE  EQU    128         ; Number of cycles for setting mode timeout
+TIMEFREEZE  EQU    100         ; Number of cycles for setting mode timeout
 TIMEDRIVE   EQU    30          ; Number of cycles till drive shutoff (1.2 Sec)
                                ; N.B. Must be less than 32 as timer is also
                                ; low byte of current position of which upper
@@ -327,7 +335,7 @@ cycleState                  ; Interrupt routine pulse cycle state
 sysFlags                    ; System status flags (all active high)
                             ;  bit 7 - Settings and EEPROM synched indicator
                             ;  bit 6 - New Rx data received indicator
-                            ;  bit 5 - Main program loop block indicator
+                            ;  bit 5 - Main program loop enabled indicator
                             ;  bit 4 - unused
                             ;  bit 3 - servo 4 drive enabled
                             ;  bit 2 - servo 3 drive enabled
@@ -454,8 +462,8 @@ eeDataStart
     DE      (MIDPOINT - 15) ; On position first bounce
     DE      (MIDPOINT - 10) ; On position second bounce
     DE      (MIDPOINT -  5) ; On position third bounce
-    DE      MIDRATE
-    DE      MIDRATE
+    DE      16
+    DE      16
 
 ; Servo 2 position and rate settings
 ;**********************************************************************
@@ -468,8 +476,8 @@ eeDataStart
     DE      (MIDPOINT - 15) ; On position first bounce
     DE      (MIDPOINT - 10) ; On position second bounce
     DE      (MIDPOINT -  5) ; On position third bounce
-    DE      MIDRATE
-    DE      MIDRATE
+    DE      16
+    DE      16
 
 ; Servo 3 position and rate settings
 ;**********************************************************************
@@ -482,8 +490,8 @@ eeDataStart
     DE      (MIDPOINT - 15) ; On position first bounce
     DE      (MIDPOINT - 10) ; On position second bounce
     DE      (MIDPOINT -  5) ; On position third bounce
-    DE      MIDRATE
-    DE      MIDRATE
+    DE      16
+    DE      16
 
 ; Servo 4 position and rate settings
 ;**********************************************************************
@@ -496,8 +504,8 @@ eeDataStart
     DE      (MIDPOINT - 15) ; On position first bounce
     DE      (MIDPOINT - 10) ; On position second bounce
     DE      (MIDPOINT -  5) ; On position third bounce
-    DE      MIDRATE
-    DE      MIDRATE
+    DE      16
+    DE      16
 
 ; Number of settings to load/save from/to EEPROM
 NUMSETTINGS EQU ($ - eeDataStart)
@@ -560,11 +568,15 @@ runCycle
 
     bcf     PIR1,TMR1IF     ; Clear the timer1 interrupt bitflag
 
+skipPulse
+    incf    cycleState,F    ; Advance to next state
+
     SetPCLATH cycleStateTable
     movf    cycleState,W    ; Use cycle state value ...
     addwf   PCL,F           ; ... as index for code jump
 
 cycleStateTable
+    goto    endISR
     goto    srv1Pulse
     goto    srv2Pulse
     goto    srv3Pulse
@@ -672,7 +684,6 @@ nrmlPulse
 
 endPulse
     bsf     T1CON,TMR1ON    ; Start timer1 running
-    incf    cycleState,F    ; Advance to next state
 
 endISR
     ; Exit from interrupt service routine
@@ -689,52 +700,60 @@ endISR
 srv1Pulse
     bcf     RUNMAIN         ; Disable main program loop
 
+    btfss   sysFlags,SRV1EN ; Skip if servo 1 drive is enabled ...
+    goto    skipPulse       ; ... else skip pulse for servo 1
+
     movf    srv1NowH,W      ; Get high byte of duration for position ...
     movwf   TMR1L           ; ... and save in low byte of timer1
 
     movf    srv1NowL,W      ; Get low byte of duration for position
 
-    btfsc   sysFlags,SRV1EN ; Skip if servo 1 drive is disabled ...
-    bsf     SRV1OUT         ; ... else start servo 1 pulse
+    bsf     SRV1OUT         ; Start servo 1 pulse
 
     btfss   SRV1XTND        ; Skip if servo 1 extended travel is selected
     goto    nrmlPulse
     goto    xtndPulse
 
 srv2Pulse
+    btfss   sysFlags,SRV2EN ; Skip if servo 2 drive is enabled ...
+    goto    skipPulse       ; ... else skip pulse for servo 2
+
     movf    srv2NowH,W      ; Get high byte of duration for position ...
     movwf   TMR1L           ; ... and save in low byte of timer1
 
     movf    srv2NowL,W      ; Get low byte of duration for position
 
-    btfsc   sysFlags,SRV2EN ; Skip if servo 2 drive is disabled ...
-    bsf     SRV2OUT         ; ... else start servo 2 pulse
+    bsf     SRV2OUT         ; Start servo 2 pulse
 
     btfss   SRV2XTND        ; Skip if servo 2 extended travel is selected
     goto    nrmlPulse
     goto    xtndPulse
 
 srv3Pulse
+    btfss   sysFlags,SRV3EN ; Skip if servo 3 drive is enabled ...
+    goto    skipPulse       ; ... else skip pulse for servo 3
+
     movf    srv3NowH,W      ; Get high byte of duration for position ...
     movwf   TMR1L           ; ... and save in low byte of timer1
 
     movf    srv3NowL,W      ; Get low byte of duration for position
 
-    btfsc   sysFlags,SRV3EN ; Skip if servo 3 drive is disabled ...
-    bsf     SRV3OUT         ; ... else start servo 3 pulse
+    bsf     SRV3OUT         ; Start servo 3 pulse
 
     btfss   SRV3XTND        ; Skip if servo 3 extended travel is selected
     goto    nrmlPulse
     goto    xtndPulse
 
 srv4Pulse
+    btfss   sysFlags,SRV4EN ; Skip if servo 4 drive is enabled ...
+    goto    skipPulse       ; ... else skip pulse for servo 4
+
     movf    srv4NowH,W      ; Get high byte of duration for position ...
     movwf   TMR1L           ; ... and save in low byte of timer1
 
     movf    srv4NowL,W      ; Get low byte of duration for position
 
-    btfsc   sysFlags,SRV4EN ; Skip if servo 4 drive is disabled ...
-    bsf     SRV4OUT         ; ... else start servo 4 pulse
+    bsf     SRV4OUT         ; Start servo 4 pulse
 
     btfss   SRV4XTND        ; Skip if servo 4 extended travel is selected
     goto    nrmlPulse
