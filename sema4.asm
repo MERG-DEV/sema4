@@ -331,21 +331,14 @@ sysFlags                    ; System status flags (all active high)
                             ;  bit 7 - Settings and EEPROM synched indicator
                             ;  bit 6 - New Rx data received indicator
                             ;  bit 5 - Main program loop enabled indicator
-                            ;  bit 4 - unused
-                            ;  bit 3 - servo 4 drive enabled
-                            ;  bit 2 - servo 3 drive enabled
-                            ;  bit 1 - servo 2 drive enabled
-                            ;  bit 0 - servo 1 drive enabled
+                            ;  bits 4..1 - Unused
+                            ;  bit 0 - Servo 1 drive enabled
 
 srvCtrl                     ; Servo control flags (all active high)
-                            ;  bit 7 - Servo 4 extended travel selected
-                            ;  bit 6 - Servo 3 extended travel selected
-                            ;  bit 5 - servo 4 control input (inverse of port)
-                            ;  bit 4 - servo 3 control input (inverse of port)
-                            ;  bit 3 - Servo 2 extended travel selected
+                            ;  bits 7..3 - Unused
                             ;  bit 2 - Servo 1 extended travel selected
-                            ;  bit 1 - servo 2 control input (inverse of port)
-                            ;  bit 0 - servo 1 control input (inverse of port)
+                            ;  bit 1 - Unused
+                            ;  bit 0 - Servo 1 control input (inverse of port)
 
 ; Servo 1 position and rate settings
 ;**********************************************************************
@@ -361,47 +354,47 @@ srv1On3                     ; On position third bounce
 srv1OffRate                 ; Off rate
 srv1OnRate                  ; On rate
 
-; Servo 2 position and rate settings
+; Servo 2 position and rate settings, repurposed for indicator bandpass bounds
 ;**********************************************************************
 
-srv2Off                     ; Off position
-srv2Off1                    ; Off position first bounce
-srv2Off2                    ; Off position second bounce
-srv2Off3                    ; Off position third bounce
-srv2On                      ; On position
-srv2On1                     ; On position first bounce
-srv2On2                     ; On position second bounce
-srv2On3                     ; On position third bounce
-srv2OffRate                 ; Off rate
-srv2OnRate                  ; On rate
+ind2LoWtr                   ; Indicator 2 bandpass lower bound
+ind1LoWtr                   ; Indicator 1 bandpass lower bound
+ind4LoWtr                   ; Indicator 4 bandpass lower bound
+ind6LoWtr                   ; Indicator 6 bandpass lower bound
+ind2HiWtr                   ; Indicator 2 bandpass upper bound
+ind1HiWtr                   ; Indicator 1 bandpass upper bound
+ind4HiWtr                   ; Indicator 4 bandpass upper bound
+ind6HiWtr                   ; Indicator 6 bandpass upper bound
+srv2OffRate                 ; Unused
+srv2OnRate                  ; Unused
 
 ; Servo 3 position and rate settings
 ;**********************************************************************
 
-srv3Off                     ; Off position
-srv3Off1                    ; Off position first bounce
-srv3Off2                    ; Off position second bounce
-srv3Off3                    ; Off position third bounce
-srv3On                      ; On position
-srv3On1                     ; On position first bounce
-srv3On2                     ; On position second bounce
-srv3On3                     ; On position third bounce
-srv3OffRate                 ; Off rate
-srv3OnRate                  ; On rate
+ind3LoWtr                   ; Indicator 3 bandpass lower bound
+ind7LoWtr                   ; Indicator 7 bandpass lower bound
+srv3Off2                    ; Unused
+srv3Off3                    ; Unused
+ind3HiWtr                   ; Indicator 3 bandpass upper bound
+ind7HiWtr                   ; Indicator 7 bandpass upper bound
+srv3On2                     ; Unused
+srv3On3                     ; Unused
+srv3OffRate                 ; Unused
+srv3OnRate                  ; Unused
 
 ; Servo 4 position and rate settings
 ;**********************************************************************
 
-srv4Off                     ; Off position
-srv4Off1                    ; Off position first bounce
-srv4Off2                    ; Off position second bounce
-srv4Off3                    ; Off position third bounce
-srv4On                      ; On position
-srv4On1                     ; On position first bounce
-srv4On2                     ; On position second bounce
-srv4On3                     ; On position third bounce
-srv4OffRate                 ; Off rate
-srv4OnRate                  ; On rate
+ind5LoWtr                   ; Indicator 5 bandpass lower bound
+srv4Off1                    ; Unused
+srv4Off2                    ; Unused
+srv4Off3                    ; Unused
+ind5HiWtr                   ; Indicator 5 bandpass upper bound
+srv4On1                     ; Unused
+srv4On2                     ; Unused
+srv4On3                     ; Unused
+srv4OffRate                 ; Unused
+srv4OnRate                  ; Unused
 
 ; Servo current positions
 ;**********************************************************************
@@ -1313,201 +1306,201 @@ srv1SetOnRate
     goto    receivedRate
 
 srv2SetOffPosition
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2Off1        ; ... as ...
-    movwf   srv2Off2        ; ... servo ...
-    movwf   srv2Off3        ; ... Off bounce positions (Servo4 compatabillity)
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind1LoWtr       ; ... indicator 1 bandpass lower bound
+    movwf   ind4LoWtr       ; ... indicator 4 bandpass lower bound
+    movwf   ind6LoWtr       ; ... indicator 6 bandpass lower bound
 
 srv2SetOffOnly
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2Off         ; ... as servo Off position
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind2LoWtr       ; ... indicator 2 bandpass lower bound
     goto    receivedSetting
 
 srv2SetOff1Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2Off1        ; ... as servo Off bounce 1 position
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind1LoWtr       ; ... indicator 1 bandpass lower bound
     goto    receivedSetting
 
 srv2SetOff2Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2Off2        ; ... as servo Off bounce 2 position
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind4LoWtr       ; ... indicator 4 bandpass lower bound
     goto    receivedSetting
 
 srv2SetOff3Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2Off3        ; ... as servo Off bounce 3 position
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind6LoWtr       ; ... indicator 6 bandpass lower bound
     goto    receivedSetting
 
 srv2SetOnPosition
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2On1         ; ... as ...
-    movwf   srv2On2         ; ... servo ...
-    movwf   srv2On3         ; ... On bounce positions (Servo4 compatabillity)
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind1HiWtr       ; ... indicator 1 bandpass upper bound
+    movwf   ind4HiWtr       ; ... indicator 4 bandpass upper bound
+    movwf   ind6HiWtr       ; ... indicator 6 bandpass upper bound
 
 srv2SetOnOnly
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2On          ; ... as servo On position
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind2HiWtr       ; ... indicator 2 bandpass upper bound
     goto    receivedSetting
 
 srv2SetOn1Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2On1         ; ... as servo On bounce 1 position
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind1HiWtr       ; ... indicator 1 bandpass upper bound
     goto    receivedSetting
 
 srv2SetOn2Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2On2         ; ... as servo On bounce 2 position
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind4HiWtr       ; ... indicator 4 bandpass upper bound
     goto    receivedSetting
 
 srv2SetOn3Position
     movf    temp4,W         ; Store received value ...
-    movwf   srv2On3         ; ... as servo On bounce 3 position
+    movwf   ind6HiWtr       ; ... indicator 6 bandpass upper bound
     goto    receivedSetting
 
 srv2NewOffRate
     swapf   temp4,F         ; Negate effect of following nibble swap
 srv2SetOffRate
     swapf   temp4,W         ; Store received value (x16 by nibble swap) ...
-    movwf   srv2OffRate     ; ... as servo Off rate
+    movwf   srv2OffRate     ; Unused
     goto    receivedRate
 
 srv2NewOnRate
     swapf   temp4,F         ; Negate effect of following nibble swap
 srv2SetOnRate
     swapf   temp4,W         ; Store received value (x16 by nibble swap) ...
-    movwf   srv2OnRate      ; ... as servo On rate
+    movwf   srv2OnRate      ; Unused
     goto    receivedRate
 
 srv3SetOffPosition
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3Off1        ; ... as ...
-    movwf   srv3Off2        ; ... servo ...
-    movwf   srv3Off3        ; ... Off bounce positions (Servo4 compatabillity)
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind7LoWtr       ; ... indicator 7 bandpass lower bound
+    movwf   srv3Off2        ; Unused
+    movwf   srv3Off3        ; Unused
 
 srv3SetOffOnly
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3Off         ; ... as servo Off position
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind3LoWtr       ; ... indicator 3 bandpass lower bound
     goto    receivedSetting
 
 srv3SetOff1Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3Off1        ; ... as servo Off bounce 1 position
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind7LoWtr       ; ... indicator 7 bandpass lower bound
     goto    receivedSetting
 
 srv3SetOff2Position
     movf    temp4,W         ; Store received value ...
-    movwf   srv3Off2        ; ... as servo Off bounce 2 position
+    movwf   srv3Off2        ; Unused
     goto    receivedSetting
 
 srv3SetOff3Position
     movf    temp4,W         ; Store received value ...
-    movwf   srv3Off3        ; ... as servo Off bounce 3 position
+    movwf   srv3Off3        ; Unused
     goto    receivedSetting
 
 srv3SetOnPosition
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3On1         ; ... as ...
-    movwf   srv3On2         ; ... servo ...
-    movwf   srv3On3         ; ... On bounce positions (Servo4 compatabillity)
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind7HiWtr       ; ... indicator 7 bandpass upper bound
+    movwf   srv3On2         ; Unused
+    movwf   srv3On3         ; Unused
 
 srv3SetOnOnly
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3On          ; ... as servo On position
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind3HiWtr       ; ... indicator 3 bandpass upper bound
     goto    receivedSetting
 
 srv3SetOn1Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3On1         ; ... as servo On bounce 1 position
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind7HiWtr       ; ... indicator 7 bandpass upper bound
     goto    receivedSetting
 
 srv3SetOn2Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3On2         ; ... as servo On bounce 2 position
+    movf    temp4,W         ; Store received value as ...
+    movwf   srv3On2         ; Unused
     goto    receivedSetting
 
 srv3SetOn3Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3On3         ; ... as servo On bounce 3 position
+    movf    temp4,W         ; Store received value as ...
+    movwf   srv3On3         ; Unused
     goto    receivedSetting
 
 srv3NewOffRate
     swapf   temp4,F         ; Negate effect of following nibble swap
 srv3SetOffRate
     swapf   temp4,W         ; Store received value (x16 by nibble swap) ...
-    movwf   srv3OffRate     ; ... as servo Off rate
+    movwf   srv3OffRate     ; Unused
     goto    receivedRate
 
 srv3NewOnRate
     swapf   temp4,F         ; Negate effect of following nibble swap
 srv3SetOnRate
     swapf   temp4,W         ; Store received value (x16 by nibble swap) ...
-    movwf   srv3OnRate      ; ... as servo On Rate
+    movwf   srv3OnRate      ; Unused
     goto    receivedRate
 
 srv4SetOffPosition
-    movf    temp4,W         ; Store received value ...
-    movwf   srv4Off1        ; ... as ...
-    movwf   srv4Off2        ; ... servo ...
-    movwf   srv4Off3        ; ... Off bounce positions (Servo4 compatabillity)
+    movf    temp4,W         ; Store received value as ...
+    movwf   srv4Off1        ; Unused
+    movwf   srv4Off2        ; Unused
+    movwf   srv4Off3        ; Unused
 
 srv4SetOffOnly
-    movf    temp4,W         ; Store received value ...
-    movwf   srv4Off         ; ... as servo Off position
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind5LoWtr       ; ... indicator 3 bandpass lower bound
     goto    receivedSetting
 
 srv4SetOff1Position
     movf    temp4,W         ; Store received value ...
-    movwf   srv4Off1        ; ... as servo Off bounce 1 position
+    movwf   srv4Off1        ; Unused
     goto    receivedSetting
 
 srv4SetOff2Position
     movf    temp4,W         ; Store received value ...
-    movwf   srv4Off2        ; ... as servo Off bounce 2 position
+    movwf   srv4Off2        ; Unused
     goto    receivedSetting
 
 srv4SetOff3Position
     movf    temp4,W         ; Store received value ...
-    movwf   srv4Off3        ; ... as servo Off bounce 3 position
+    movwf   srv4Off3        ; Unused
     goto    receivedSetting
 
 srv4SetOnPosition
     movf    temp4,W         ; Store received value ...
-    movwf   srv4On1         ; ... as ...
-    movwf   srv4On2         ; ... servo ...
-    movwf   srv4On3         ; ... On bounce positions (Servo4 compatabillity)
+    movwf   srv4On1         ; Unused
+    movwf   srv4On2         ; Unused
+    movwf   srv4On3         ; Unused
 
 srv4SetOnOnly
-    movf    temp4,W         ; Store received value ...
-    movwf   srv4On          ; ... as servo On position
+    movf    temp4,W         ; Store received value as ...
+    movwf   ind5HiWtr       ; ... indicator 5 bandpass lower bound
     goto    receivedSetting
 
 srv4SetOn1Position
     movf    temp4,W         ; Store received value ...
-    movwf   srv4On1         ; ... as servo On bounce 1 position
+    movwf   srv4On1         ; Unused
     goto    receivedSetting
 
 srv4SetOn2Position
     movf    temp4,W         ; Store received value ...
-    movwf   srv4On2         ; ... as servo On bounce 2 position
+    movwf   srv4On2         ; Unused
     goto    receivedSetting
 
 srv4SetOn3Position
     movf    temp4,W         ; Store received value ...
-    movwf   srv4On3         ; ... as servo On bounce 3 position
+    movwf   srv4On3         ; Unused
     goto    receivedSetting
 
 srv4NewOffRate
     swapf   temp4,F         ; Negate effect of following nibble swap
 srv4SetOffRate
     swapf   temp4,W         ; Store received value (x16 by nibble swap) ...
-    movwf   srv4OffRate     ; ... as servo Off rate
+    movwf   srv4OffRate     ; Unused
     goto    receivedRate
 
 srv4NewOnRate
     swapf   temp4,F         ; Negate effect of following nibble swap
 srv4SetOnRate
     swapf   temp4,W         ; Store received value (x16 by nibble swap) ...
-    movwf   srv4OnRate      ; ... as servo On rate
+    movwf   srv4OnRate      ; Unused
 
     ; Common end action for rate setting command
     ;******************************************************************
@@ -1678,6 +1671,32 @@ getServoTarget
 
 
 ;**********************************************************************
+; Macro: Position indicator update                                    *
+;**********************************************************************
+PstnIndUpdate   macro   srvPstn, indLoWtr, indHiWtr, indPort, indBit
+
+                local   outOfBand
+
+    movf    indLoWtr,W      ; Subtract lower bound ...
+    subwf   srvPstn,F       ; ... from current position
+
+    btfss   STATUS,C        ; Skip if current not less than lower bound ...
+    goto    outOfBand       ; ... else current outside pass band
+
+    movf    srvPstn,W       ; Subtract current position ...
+    subwf   indHiWtr,F      ; ... from upper bound
+
+    btfsc   STATUS,C        ; Skip if current greater than upper bound ...
+    bsf     indPort,indBit  ; ... else current inside pass band, indicator on
+
+    btfss   STATUS,C        ; Skip if current not greater than upper bound ...
+outOfBand
+    bcf     indPort,indBit  ; ... else current outside pass band, indicator off
+
+    endm
+
+
+;**********************************************************************
 ; Macro: Servo current position update                                *
 ;     Rate (speed) passed in W                                        *
 ;**********************************************************************
@@ -1771,6 +1790,16 @@ updateSrv1On
 
 ServoUpdate1
     ServoUpdate    srv1State, srv1Off, srv1NowL, SRV1EN
+
+    ; Update position indicator outputs
+
+    PstnIndUpdate   srv1NowL, ind1LoWtr, ind1HiWtr, IND1OUT
+    PstnIndUpdate   srv1NowL, ind2LoWtr, ind2HiWtr, IND2OUT
+    PstnIndUpdate   srv1NowL, ind3LoWtr, ind3HiWtr, IND3OUT
+    PstnIndUpdate   srv1NowL, ind4LoWtr, ind4HiWtr, IND4OUT
+    PstnIndUpdate   srv1NowL, ind5LoWtr, ind5HiWtr, IND5OUT
+    PstnIndUpdate   srv1NowL, ind6LoWtr, ind6HiWtr, IND6OUT
+    PstnIndUpdate   srv1NowL, ind7LoWtr, ind7HiWtr, IND7OUT
 
     return
 
