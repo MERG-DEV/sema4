@@ -117,16 +117,20 @@
 ;       Reduced input skip timeout after receiving a position setting *
 ;       to about one second.                                          *
 ;                                                                     *
+;    03 Aug 2011 - Chris White:                                       *
+;       Customisation for Anthony Cooper. Only one servo but several  *
+;       indicator outputs activated by "bandpass" position filters.   *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
 ;                   +5V -> VDD|1  |_| 14|VSS <- 0V                    *
-;             Servo4 In -> RA5|2      13|RA0 <- Servo1 In             *
-;             Servo3 In -> RA4|3      12|RA1 <- Servo2 In             *
+;        Indicator6 Out <- RA5|2      13|RA0 <- Servo1 In             *
+;        Indicator5 Out <- RA4|3      12|RA1 -> Indicator1 Out        *
 ;                        !MCLR|4      11|RA2 <- Serial Rx             *
 ;         Drive Shutoff -> RC5|5      10|RC0 -> Servo1 Out            *
-;      Servo1 Indicator <- RC4|6       9|RC1 -> Servo2 Out            *
-;            Servo4 Out <- RC3|7       8|RC2 -> Servo3 Out            *
+;        Indicator7 Out <- RC4|6       9|RC1 -> Indicator2 Out        *
+;        Indicator4 Out <- RC3|7       8|RC2 -> Indicator3 Out        *
 ;                             +---------+                             *
 ;                                                                     *
 ;**********************************************************************
@@ -173,7 +177,7 @@ INTVECTOR   EQU    0x0004      ; Interrupt vector location
 ;**********************************************************************
 
 INPORT      EQU    PORTA
-PORTADIR    EQU    B'11111111' ; All bits inputs
+PORTADIR    EQU    B'11001101' ; Input: 0, 2  Output: 1, 4, 5
 PORTAPU     EQU    B'11111011' ; Pull up on port bits except serial input
 
 OUTPORT     EQU    PORTC
@@ -181,45 +185,36 @@ PORTCDIR    EQU    B'00100000' ; All bits outputs except 5 (Drive Shutoff)
 
 ; Servo control input port bit definitions (active low)
 #define  SRV1INP   INPORT,0
-#define  SRV2INP   INPORT,1
-#define  SRV3INP   INPORT,4
-#define  SRV4INP   INPORT,5
 
 ; Servo control bit definitions (active high)
 #define  SRV1IN    srvCtrl,0
-#define  SRV2IN    srvCtrl,1
-#define  SRV3IN    srvCtrl,4
-#define  SRV4IN    srvCtrl,5
 
-#define INPMASK    B'00110011' ; Mask to isolate servo control input bits
+#define INPMASK    B'00000001' ; Mask to isolate servo control input bits
 
 ; Drive shutoff option input port bit definition (active high)
 #define  DRVOFFINP PORTC,5
 
 ; Drive enabled bit definitions (active high), held in "sysFlags"
 #define  SRV1EN    0
-#define  SRV2EN    1
-#define  SRV3EN    2
-#define  SRV4EN    3
 
-#define  DRVONMASK B'00001111' ; Mask to isolate drive enabled bits
+#define  DRVONMASK B'00000001' ; Mask to isolate drive enabled bits
 
 ; Servo control output port bit definitions (active high)
 #define  SRV1OUT   OUTPORT,0
-#define  SRV2OUT   OUTPORT,1
-#define  SRV3OUT   OUTPORT,2
-#define  SRV4OUT   OUTPORT,3
+
+; Indicator output port bit definitions (active high)
+#define  IND1OUT   PORTA,1
+#define  IND2OUT   PORTC,1
+#define  IND3OUT   PORTC,2
+#define  IND4OUT   PORTC,3
+#define  IND5OUT   PORTA,4
+#define  IND6OUT   PORTA,5
+#define  IND7OUT   PORTC,4
 
 #define  OUTMASK   B'00001111' ; Mask to isolate drive enabled bits
 
-; Servo movement indication port bit definitions (active low)
-#define  SRV1IND   OUTPORT,4
-
 ; Servo extended travel selected bit definitions
 #define  SRV1XTND  srvCtrl,2
-#define  SRV2XTND  srvCtrl,3
-#define  SRV3XTND  srvCtrl,6
-#define  SRV4XTND  srvCtrl,7
 
 #define  XTNDMASK  B'11001100' ; Mask to isolate extended travel selected bits
 
@@ -415,25 +410,10 @@ srv1NowL                    ; Servo 1 current position low byte
                             ; (also used for drive shutoff timer)
 srv1NowH                    ; Servo 1 current position high byte
 
-srv2NowL                    ; Servo 2 current position low byte
-                            ; (also used for drive shutoff timer)
-srv2NowH                    ; Servo 2 current position high byte
-
-srv3NowL                    ; Servo 3 current position low byte
-                            ; (also used for drive shutoff timer)
-srv3NowH                    ; Servo 3 current position high byte
-
-srv4NowL                    ; Servo 4 current position low byte
-                            ; (also used for drive shutoff timer)
-srv4NowH                    ; Servo 4 current position high byte
-
 ; Servo movement sequence states
 ;**********************************************************************
 
 srv1State                   ; Servo 1 movement state
-srv2State                   ; Servo 2 movement state
-srv3State                   ; Servo 3 movement state
-srv4State                   ; Servo 4 movement state
 
     ENDC
 
@@ -578,9 +558,6 @@ skipPulse
 cycleStateTable
     goto    endISR
     goto    srv1Pulse
-    goto    srv2Pulse
-    goto    srv3Pulse
-    goto    srv4Pulse
     goto    cycleEnd
 
 #if (high cycleStateTable) != (high $)
@@ -714,51 +691,6 @@ srv1Pulse
     goto    nrmlPulse
     goto    xtndPulse
 
-srv2Pulse
-    btfss   sysFlags,SRV2EN ; Skip if servo 2 drive is enabled ...
-    goto    skipPulse       ; ... else skip pulse for servo 2
-
-    movf    srv2NowH,W      ; Get high byte of duration for position ...
-    movwf   TMR1L           ; ... and save in low byte of timer1
-
-    movf    srv2NowL,W      ; Get low byte of duration for position
-
-    bsf     SRV2OUT         ; Start servo 2 pulse
-
-    btfss   SRV2XTND        ; Skip if servo 2 extended travel is selected
-    goto    nrmlPulse
-    goto    xtndPulse
-
-srv3Pulse
-    btfss   sysFlags,SRV3EN ; Skip if servo 3 drive is enabled ...
-    goto    skipPulse       ; ... else skip pulse for servo 3
-
-    movf    srv3NowH,W      ; Get high byte of duration for position ...
-    movwf   TMR1L           ; ... and save in low byte of timer1
-
-    movf    srv3NowL,W      ; Get low byte of duration for position
-
-    bsf     SRV3OUT         ; Start servo 3 pulse
-
-    btfss   SRV3XTND        ; Skip if servo 3 extended travel is selected
-    goto    nrmlPulse
-    goto    xtndPulse
-
-srv4Pulse
-    btfss   sysFlags,SRV4EN ; Skip if servo 4 drive is enabled ...
-    goto    skipPulse       ; ... else skip pulse for servo 4
-
-    movf    srv4NowH,W      ; Get high byte of duration for position ...
-    movwf   TMR1L           ; ... and save in low byte of timer1
-
-    movf    srv4NowL,W      ; Get low byte of duration for position
-
-    bsf     SRV4OUT         ; Start servo 4 pulse
-
-    btfss   SRV4XTND        ; Skip if servo 4 extended travel is selected
-    goto    nrmlPulse
-    goto    xtndPulse
-
 cycleEnd
     clrf    cycleState      ; End of cycle, reset cycle state
 
@@ -864,44 +796,14 @@ initialisePositions
     movwf   srv1NowH
     clrf    srv1NowL
 
-    ; Servo 2
-    movf    srv2Off,W       ; Set current position as Off setting
-    btfsc   SRV2IN          ; Skip if input is off ...
-    movf    srv2On,W        ; ... else set current position as On setting
-    movwf   srv2NowH
-    clrf    srv2NowL
-
-    ; Servo 3
-    movf    srv3Off,W       ; Set current position as Off setting
-    btfsc   SRV3IN          ; Skip if input is off ...
-    movf    srv3On,W        ; ... else set current position as On setting
-    movwf   srv3NowH
-    clrf    srv3NowL
-
-    ; Servo 4
-    movf    srv4Off,W       ; Set current position as Off setting
-    btfsc   SRV4IN          ; Skip if input is off ...
-    movf    srv4On,W        ; ... else set current position as On setting
-    movwf   srv4NowH
-    clrf    srv4NowL
-
     ; Initialise all servo movement sequences to Off drive shutdown
     ;******************************************************************
 
     movlw   SRVOFFEND
     movwf   srv1State
-    movwf   srv2State
-    movwf   srv3State
-    movwf   srv4State
 
     btfsc   SRV1IN                  ; Skip if input is off ...
     bsf     srv1State,SRVONSTBIT    ; ... else change state to On shutdown
-    btfsc   SRV2IN                  ; Skip if input is off ...
-    bsf     srv2State,SRVONSTBIT    ; ... else change state to On shutdown
-    btfsc   SRV3IN                  ; Skip if input is off ...
-    bsf     srv3State,SRVONSTBIT    ; ... else change state to On shutdown
-    btfsc   SRV4IN                  ; Skip if input is off ...
-    bsf     srv4State,SRVONSTBIT    ; ... else change state to On shutdown
 
     movlw   DRVONMASK       ; Ensure all drive outputs are enabled
     iorwf   sysFlags,F
@@ -1419,27 +1321,22 @@ srv2SetOffPosition
 srv2SetOffOnly
     movf    temp4,W         ; Store received value ...
     movwf   srv2Off         ; ... as servo Off position
-    goto    received2OffPosition
+    goto    receivedSetting
 
 srv2SetOff1Position
     movf    temp4,W         ; Store received value ...
     movwf   srv2Off1        ; ... as servo Off bounce 1 position
-    goto    received2OffPosition
+    goto    receivedSetting
 
 srv2SetOff2Position
     movf    temp4,W         ; Store received value ...
     movwf   srv2Off2        ; ... as servo Off bounce 2 position
-    goto    received2OffPosition
+    goto    receivedSetting
 
 srv2SetOff3Position
     movf    temp4,W         ; Store received value ...
     movwf   srv2Off3        ; ... as servo Off bounce 3 position
-
-received2OffPosition
-    movwf   srv2NowH        ; Set current position as received setting value
-    bcf     SRV2IN          ; Set servo input off
-    movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
-    goto    received2Position
+    goto    receivedSetting
 
 srv2SetOnPosition
     movf    temp4,W         ; Store received value ...
@@ -1450,30 +1347,21 @@ srv2SetOnPosition
 srv2SetOnOnly
     movf    temp4,W         ; Store received value ...
     movwf   srv2On          ; ... as servo On position
-    goto    received2OnPosition
+    goto    receivedSetting
 
 srv2SetOn1Position
     movf    temp4,W         ; Store received value ...
     movwf   srv2On1         ; ... as servo On bounce 1 position
-    goto    received2OnPosition
+    goto    receivedSetting
 
 srv2SetOn2Position
     movf    temp4,W         ; Store received value ...
     movwf   srv2On2         ; ... as servo On bounce 2 position
-    goto    received2OnPosition
+    goto    receivedSetting
 
 srv2SetOn3Position
     movf    temp4,W         ; Store received value ...
     movwf   srv2On3         ; ... as servo On bounce 3 position
-
-received2OnPosition
-    movwf   srv2NowH        ; Set current position as received setting value
-    bsf     SRV2IN          ; Set servo input on
-    movlw   SRVONEND        ; Initial movement state is On drive shutdown
-received2Position
-    movwf   srv2State       ; Set movement state
-    clrf    srv2NowL
-    bsf     sysFlags,SRV2EN ; Enable servo drive output
     goto    receivedSetting
 
 srv2NewOffRate
@@ -1499,27 +1387,22 @@ srv3SetOffPosition
 srv3SetOffOnly
     movf    temp4,W         ; Store received value ...
     movwf   srv3Off         ; ... as servo Off position
-    goto    received3OffPosition
+    goto    receivedSetting
 
 srv3SetOff1Position
     movf    temp4,W         ; Store received value ...
     movwf   srv3Off1        ; ... as servo Off bounce 1 position
-    goto    received3OffPosition
+    goto    receivedSetting
 
 srv3SetOff2Position
     movf    temp4,W         ; Store received value ...
     movwf   srv3Off2        ; ... as servo Off bounce 2 position
-    goto    received3OffPosition
+    goto    receivedSetting
 
 srv3SetOff3Position
     movf    temp4,W         ; Store received value ...
     movwf   srv3Off3        ; ... as servo Off bounce 3 position
-
-received3OffPosition
-    movwf   srv3NowH        ; Set current position as received setting value
-    bcf     SRV3IN          ; Set servo input off
-    movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
-    goto    received3Position
+    goto    receivedSetting
 
 srv3SetOnPosition
     movf    temp4,W         ; Store received value ...
@@ -1530,30 +1413,21 @@ srv3SetOnPosition
 srv3SetOnOnly
     movf    temp4,W         ; Store received value ...
     movwf   srv3On          ; ... as servo On position
-    goto    received3OnPosition
+    goto    receivedSetting
 
 srv3SetOn1Position
     movf    temp4,W         ; Store received value ...
     movwf   srv3On1         ; ... as servo On bounce 1 position
-    goto    received3OnPosition
+    goto    receivedSetting
 
 srv3SetOn2Position
     movf    temp4,W         ; Store received value ...
     movwf   srv3On2         ; ... as servo On bounce 2 position
-    goto    received3OnPosition
+    goto    receivedSetting
 
 srv3SetOn3Position
     movf    temp4,W         ; Store received value ...
     movwf   srv3On3         ; ... as servo On bounce 3 position
-
-received3OnPosition
-    movwf   srv3NowH        ; Set current position as received setting value
-    bsf     SRV3IN          ; Set servo input on
-    movlw   SRVONEND        ; Initial movement state is On drive shutdown
-received3Position
-    movwf   srv3State       ; Set movement state
-    clrf    srv3NowL
-    bsf     sysFlags,SRV3EN ; Enable servo drive output
     goto    receivedSetting
 
 srv3NewOffRate
@@ -1579,27 +1453,22 @@ srv4SetOffPosition
 srv4SetOffOnly
     movf    temp4,W         ; Store received value ...
     movwf   srv4Off         ; ... as servo Off position
-    goto    received4OffPosition
+    goto    receivedSetting
 
 srv4SetOff1Position
     movf    temp4,W         ; Store received value ...
     movwf   srv4Off1        ; ... as servo Off bounce 1 position
-    goto    received4OffPosition
+    goto    receivedSetting
 
 srv4SetOff2Position
     movf    temp4,W         ; Store received value ...
     movwf   srv4Off2        ; ... as servo Off bounce 2 position
-    goto    received4OffPosition
+    goto    receivedSetting
 
 srv4SetOff3Position
     movf    temp4,W         ; Store received value ...
     movwf   srv4Off3        ; ... as servo Off bounce 3 position
-
-received4OffPosition
-    movwf   srv4NowH        ; Set current position as received setting value
-    bcf     SRV4IN          ; Stt servo input off
-    movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
-    goto    received4Position
+    goto    receivedSetting
 
 srv4SetOnPosition
     movf    temp4,W         ; Store received value ...
@@ -1610,30 +1479,21 @@ srv4SetOnPosition
 srv4SetOnOnly
     movf    temp4,W         ; Store received value ...
     movwf   srv4On          ; ... as servo On position
-    goto    received4OnPosition
+    goto    receivedSetting
 
 srv4SetOn1Position
     movf    temp4,W         ; Store received value ...
     movwf   srv4On1         ; ... as servo On bounce 1 position
-    goto    received4OnPosition
+    goto    receivedSetting
 
 srv4SetOn2Position
     movf    temp4,W         ; Store received value ...
     movwf   srv4On2         ; ... as servo On bounce 2 position
-    goto    received4OnPosition
+    goto    receivedSetting
 
 srv4SetOn3Position
     movf    temp4,W         ; Store received value ...
     movwf   srv4On3         ; ... as servo On bounce 3 position
-
-received4OnPosition
-    movwf   srv4NowH        ; Set current position as received setting value
-    bsf     SRV4IN          ; Set servo input on
-    movlw   SRVONEND        ; Initial movement state is On drive shutdown
-received4Position
-    movwf   srv4State       ; Set movement state
-    clrf    srv4NowL
-    bsf     sysFlags,SRV4EN ; Enable servo drive output
     goto    receivedSetting
 
 srv4NewOffRate
@@ -1912,69 +1772,6 @@ updateSrv1On
 ServoUpdate1
     ServoUpdate    srv1State, srv1Off, srv1NowL, SRV1EN
 
-    movlw   SRVMVMASK       ; Mask non movement states bits ...
-    andwf   srv1State,W     ; ... from servo movement state
-    btfss   STATUS,Z        ; Skip if movement complete ...
-    goto    updateSrv2      ; ... otherwise skip indication output
-
-    btfsc   SRV1IN          ; Skip if input off ...
-    bcf     SRV1IND         ; ... else set on movement completed indication
-    btfss   SRV1IN          ; Skip if input on ...
-    bsf     SRV1IND         ; ... else set off movement completed indication
-
-updateSrv2
-    btfsc   SRV2IN          ; Skip if input off ...
-    goto    updateSrv2On    ; ... else perform servo On update
-
-updateSrv2Off
-    ServoOffState  srv2State
-
-    movf    srv2OffRate,W
-    goto    ServoUpdate2
-
-updateSrv2On
-    ServoOnState   srv2State
-
-    movf    srv2OnRate,W
-
-ServoUpdate2
-    ServoUpdate    srv2State, srv2Off, srv2NowL, SRV2EN
-
-updateSrv3
-    btfsc   SRV3IN          ; Skip if input off ...
-    goto    updateSrv3On    ; ... else perform servo On update
-
-updateSrv3Off
-    ServoOffState  srv3State
-
-    movf    srv3OffRate,W
-    goto    ServoUpdate3
-
-updateSrv3On
-    ServoOnState   srv3State
-
-    movf    srv3OnRate,W
-
-ServoUpdate3
-    ServoUpdate    srv3State, srv3Off, srv3NowL, SRV3EN
-
-updateSrv4
-    btfsc   SRV4IN          ; Skip if input off ...
-    goto    updateSrv4On    ; ... else perform servo On update
-
-updateSrv4Off
-    ServoOffState  srv4State
-
-    movf    srv4OffRate,W
-    goto    ServoUpdate4
-
-updateSrv4On
-    ServoOnState   srv4State
-
-    movf    srv4OnRate,W
-
-ServoUpdate4
-    ServoUpdate    srv4State, srv4Off, srv4NowL, SRV4EN
     return
 
 
