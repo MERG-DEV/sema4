@@ -11,14 +11,17 @@
 ;**********************************************************************
 ;                                                                     *
 ;   Derived from orignal Servo4 by Mike Bolton                        *
-;   Gives the pulse output for 4 conventional servos.                 *
-;   Input control by on / off switches to ground (active low).        *
-;   Port A has active pull-ups to Vdd.                                *
+;   Gives the pulse output for 1 conventional servo.                  *
+;   Input control by on / off switch to ground (active low).          *
+;   Port A has active pull-ups to Vdd on inputs.                      *
 ;   End limits, travel speed, and optional bounce positions           *
 ;   configured via a serial input (RS232 compatible).                 *
 ;   Setting values stored in EEPROM.                                  *
 ;   Option selectable by input bit to shutoff drive pulse shortly     *
 ;   after completion of movement sequence.                            *
+;   Seven position indication "bandpass" filters with configurable    *
+;   upper and lower bounds. Indicator on if position at upper or      *
+;   lower bound or bounds, otherwise off.                             *
 ;                                                                     *
 ;**********************************************************************
 ;                                                                     *
@@ -120,6 +123,11 @@
 ;    03 Aug 2011 - Chris White:                                       *
 ;       Customisation for Anthony Cooper. Only one servo but several  *
 ;       indicator outputs activated by "bandpass" position filters.   *
+;                                                                     *
+;    04 Aug 2011 - Chris White:                                       *
+;       Added subroutine to set indicator 2 pass band as one third    *
+;       between indicator 1 upper and indicator 4 lower bounds,       *
+;       indicator 3 pass band two thirds of same.                     *
 ;                                                                     *
 ;**********************************************************************
 ;                                                                     *
@@ -354,7 +362,7 @@ srv1On3                     ; On position third bounce
 srv1OffRate                 ; Off rate
 srv1OnRate                  ; On rate
 
-; Servo 2 position and rate settings, repurposed for indicator bandpass bounds
+; Servo 2 position and rate settings, repurposed for indicator pass band bounds
 ;**********************************************************************
 
 ind2LoWtr                   ; Indicator 2 bandpass lower bound
@@ -368,7 +376,7 @@ ind6HiWtr                   ; Indicator 6 bandpass upper bound
 srv2OffRate                 ; Unused
 srv2OnRate                  ; Unused
 
-; Servo 3 position and rate settings
+; Servo 3 position and rate settings, repurposed for indicator pass band bounds
 ;**********************************************************************
 
 ind3LoWtr                   ; Indicator 3 bandpass lower bound
@@ -382,7 +390,7 @@ srv3On3                     ; Unused
 srv3OffRate                 ; Unused
 srv3OnRate                  ; Unused
 
-; Servo 4 position and rate settings
+; Servo 4 position and rate settings, repurposed for indicator pass band bounds
 ;**********************************************************************
 
 ind5LoWtr                   ; Indicator 5 bandpass lower bound
@@ -435,50 +443,50 @@ eeDataStart
     DE      (MIDPOINT - 15) ; On position first bounce
     DE      (MIDPOINT - 10) ; On position second bounce
     DE      (MIDPOINT -  5) ; On position third bounce
-    DE      16
-    DE      16
+    DE      16              ; Off rate
+    DE      16              ; On rate
 
-; Servo 2 position and rate settings
+; Servo 2 position and rate settings, repurposed for indicator pass band bounds
 ;**********************************************************************
 
-    DE      (MIDPOINT - 20) ; Off position
-    DE      (MIDPOINT -  5) ; Off position first bounce
-    DE      (MIDPOINT - 10) ; Off position second bounce
-    DE      (MIDPOINT - 15) ; Off position third bounce
-    DE      MIDPOINT        ; On position
-    DE      (MIDPOINT - 15) ; On position first bounce
-    DE      (MIDPOINT - 10) ; On position second bounce
-    DE      (MIDPOINT -  5) ; On position third bounce
-    DE      16
-    DE      16
+    DE      (MIDPOINT - 20) ; Indicator 2 bandpass lower bound
+    DE      (MIDPOINT -  5) ; Indicator 1 bandpass lower bound
+    DE      (MIDPOINT - 10) ; Indicator 4 bandpass lower bound
+    DE      (MIDPOINT - 15) ; Indicator 6 bandpass lower bound
+    DE      MIDPOINT        ; Indicator 2 bandpass upper bound
+    DE      (MIDPOINT - 15) ; Indicator 1 bandpass upper bound
+    DE      (MIDPOINT - 10) ; Indicator 4 bandpass upper bound
+    DE      (MIDPOINT -  5) ; Indicator 6 bandpass upper bound
+    DE      16              ; Unused
+    DE      16              ; Unused
 
-; Servo 3 position and rate settings
+; Servo 3 position and rate settings, repurposed for indicator pass band bounds
 ;**********************************************************************
 
-    DE      (MIDPOINT - 20) ; Off position
-    DE      (MIDPOINT -  5) ; Off position first bounce
-    DE      (MIDPOINT - 10) ; Off position second bounce
-    DE      (MIDPOINT - 15) ; Off position third bounce
-    DE      MIDPOINT        ; On position
-    DE      (MIDPOINT - 15) ; On position first bounce
-    DE      (MIDPOINT - 10) ; On position second bounce
-    DE      (MIDPOINT -  5) ; On position third bounce
-    DE      16
-    DE      16
+    DE      (MIDPOINT - 20) ; Indicator 3 bandpass lower bound
+    DE      (MIDPOINT -  5) ; Indicator 7 bandpass lower bound
+    DE      (MIDPOINT - 10) ; Unused
+    DE      (MIDPOINT - 15) ; Unused
+    DE      MIDPOINT        ; Indicator 3 bandpass upper bound
+    DE      (MIDPOINT - 15) ; Indicator 7 bandpass upper bound
+    DE      (MIDPOINT - 10) ; Unused
+    DE      (MIDPOINT -  5) ; Unused
+    DE      16              ; Unused
+    DE      16              ; Unused
 
-; Servo 4 position and rate settings
+; Servo 4 position and rate settings, repurposed for indicator pass band bounds
 ;**********************************************************************
 
-    DE      (MIDPOINT - 20) ; Off position
-    DE      (MIDPOINT -  5) ; Off position first bounce
-    DE      (MIDPOINT - 10) ; Off position second bounce
-    DE      (MIDPOINT - 15) ; Off position third bounce
-    DE      MIDPOINT        ; On position
-    DE      (MIDPOINT - 15) ; On position first bounce
-    DE      (MIDPOINT - 10) ; On position second bounce
-    DE      (MIDPOINT -  5) ; On position third bounce
-    DE      16
-    DE      16
+    DE      (MIDPOINT - 20) ; Indicator 5 bandpass lower bound
+    DE      (MIDPOINT -  5) ; Unused
+    DE      (MIDPOINT - 10) ; Unused
+    DE      (MIDPOINT - 15) ; Unused
+    DE      MIDPOINT        ; Indicator 5 bandpass upper bound
+    DE      (MIDPOINT - 15) ; Unused
+    DE      (MIDPOINT - 10) ; Unused
+    DE      (MIDPOINT -  5) ; Unused
+    DE      16              ; Unused
+    DE      16              ; Unused
 
 ; Number of settings to load/save from/to EEPROM
 NUMSETTINGS EQU ($ - eeDataStart)
@@ -937,6 +945,66 @@ asciiTensTable
 
 
 ;**********************************************************************
+; Set default indicator 1 to 4 pass bands subroutine                  *
+;**********************************************************************
+defaultInds
+
+    clrf    ind1LoWtr       ; Indicator 1 lower bound default = 0
+    clrf    ind4HiWtr       ; Indicator 4 upper bound ...
+    decf    ind4HiWtr       ; ... = 255
+
+    movf    srv1Off,W       ; Subtract Servo1 off position ...
+    subwf   srv1On,W        ; ... from on position
+
+    btfss   STATUS,C        ; Skip if off position not greater than on ...
+    goto    swapDefaults    ; ... else use off for upper bound and on for lower
+
+    movf    srv1Off,W       ; Set Servo1 off position ...
+    movwf   ind1HiWtr       ; ... as indicator 1 upper bound default
+    movf    srv1On,W        ; Set Servo1 on position ...
+    movwf   ind4LoWtr       ; ... as indicator 4 lower bound default
+    goto    default23       ; Set indicator 2 and 3 defaults
+
+swapDefaults
+    movf    srv1On,W        ; Set Servo1 on position ...
+    movwf   ind1HiWtr       ; ... as indicator 1 upper bound default
+    movf    srv1Off,W       ; Set Servo1 off position ...
+    movwf   ind4LoWtr       ; ... as indicator 4 lower bound default
+
+default23
+
+    ; Calculate difference between bounds 1 upper and 4 lower
+    ;******************************************************************
+
+    movf    ind1HiWtr,W     ; Subtract indicator 1 upper bound ...
+    subwf   ind4LoWtr,W     ; ... from indicator 4 lower bound
+
+    ; Calculate one third the difference between bounds 1 upper and 4 lower
+    ;******************************************************************
+
+    clrf    ind3HiWtr       ; Temporarily use to hold result
+    decf    ind3HiWtr,F     ; Decrement through zero (see loop below)
+
+defaultLoop
+    incf    ind3HiWtr,F     ; Increment result (first time increment to zero)
+    sublw   3               ; Subtract 3 from difference between bounds
+    btfsc   STATUS,C        ; Skip if subtraction underflowed through zero ...
+    goto    defaultLoop     ; ... else continue with division
+
+    movf    ind1HiWtr,W     ; Indicator 1 upper bound ...
+    addwf   ind3HiWtr,W     ; ... plus a third of difference to 4 lower ...
+    movwf   ind2LoWtr       ; ... as indicator 2 lower bound default ...
+    movwf   ind2HiWtr       ; ... and upper bound default
+
+    movf    ind4LoWtr,W     ; Indicator 4 lower bound ...
+    subwf   ind3HiWtr,W     ; ... minus a third of difference from 1 upper ...
+    movwf   ind3LoWtr       ; ... as indicator 3 lower bound default ...
+    movwf   ind3HiWtr       ; ... and upper bound default
+
+    return
+
+
+;**********************************************************************
 ;    System initialisation                                            *
 ;**********************************************************************
 initialise
@@ -1234,6 +1302,7 @@ srv1SetOffPosition
 srv1SetOffOnly
     movf    temp4,W         ; Store received value ...
     movwf   srv1Off         ; ... as servo Off position
+    call    defaultInds     ; Set default pass bands for indicators 1 to 4
     goto    received1OffPosition
 
 srv1SetOff1Position
@@ -1265,6 +1334,7 @@ srv1SetOnPosition
 srv1SetOnOnly
     movf    temp4,W         ; Store received value ...
     movwf   srv1On          ; ... as servo On position
+    call    defaultInds     ; Set default pass bands for indicators 1 to 4
     goto    received1OnPosition
 
 srv1SetOn1Position
