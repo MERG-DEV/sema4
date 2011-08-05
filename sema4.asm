@@ -131,7 +131,7 @@
 ;                                                                     *
 ;    05 Aug 2011 - Chris White:                                       *
 ;       Corrected subroutine to set indicator 1, 2, 3, and 4 pass     *
-:       band bounds when either on or off position is changed.        *
+;       band bounds when either on or off position is changed.        *
 ;                                                                     *
 ;**********************************************************************
 ;                                                                     *
