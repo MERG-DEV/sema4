@@ -129,6 +129,10 @@
 ;       between indicator 1 upper and indicator 4 lower bounds,       *
 ;       indicator 3 pass band two thirds of same.                     *
 ;                                                                     *
+;    05 Aug 2011 - Chris White:                                       *
+;       Corrected subroutine to set indicator 1, 2, 3, and 4 pass     *
+:       band bounds when either on or off position is changed.        *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
@@ -185,8 +189,8 @@ INTVECTOR   EQU    0x0004      ; Interrupt vector location
 ;**********************************************************************
 
 INPORT      EQU    PORTA
-PORTADIR    EQU    B'11001101' ; Input: 0, 2  Output: 1, 4, 5
-PORTAPU     EQU    B'11111011' ; Pull up on port bits except serial input
+PORTADIR    EQU    B'11001101' ; Input: 0, 2, 3  Output: 1, 4, 5
+PORTAPU     EQU    B'00001001' ; Pull up on inputs except serial input
 
 OUTPORT     EQU    PORTC
 PORTCDIR    EQU    B'00100000' ; All bits outputs except 5 (Drive Shutoff)
@@ -219,7 +223,7 @@ PORTCDIR    EQU    B'00100000' ; All bits outputs except 5 (Drive Shutoff)
 #define  IND6OUT   PORTA,5
 #define  IND7OUT   PORTC,4
 
-#define  OUTMASK   B'00001111' ; Mask to isolate drive enabled bits
+#define  OUTMASK   B'00000001' ; Mask to isolate drive enabled bits
 
 ; Servo extended travel selected bit definitions
 #define  SRV1XTND  srvCtrl,2
@@ -449,26 +453,26 @@ eeDataStart
 ; Servo 2 position and rate settings, repurposed for indicator pass band bounds
 ;**********************************************************************
 
-    DE      (MIDPOINT - 20) ; Indicator 2 bandpass lower bound
-    DE      (MIDPOINT -  5) ; Indicator 1 bandpass lower bound
-    DE      (MIDPOINT - 10) ; Indicator 4 bandpass lower bound
-    DE      (MIDPOINT - 15) ; Indicator 6 bandpass lower bound
-    DE      MIDPOINT        ; Indicator 2 bandpass upper bound
-    DE      (MIDPOINT - 15) ; Indicator 1 bandpass upper bound
-    DE      (MIDPOINT - 10) ; Indicator 4 bandpass upper bound
-    DE      (MIDPOINT -  5) ; Indicator 6 bandpass upper bound
+    DE      (MIDPOINT - 15) ; Indicator 2 bandpass lower bound
+    DE      (MIDPOINT - 20) ; Indicator 1 bandpass lower bound
+    DE      MIDPOINT        ; Indicator 4 bandpass lower bound
+    DE      (MIDPOINT - 10) ; Indicator 6 bandpass lower bound
+    DE      (MIDPOINT - 15) ; Indicator 2 bandpass upper bound
+    DE      (MIDPOINT - 20) ; Indicator 1 bandpass upper bound
+    DE      MIDPOINT        ; Indicator 4 bandpass upper bound
+    DE      (MIDPOINT - 10) ; Indicator 6 bandpass upper bound
     DE      16              ; Unused
     DE      16              ; Unused
 
 ; Servo 3 position and rate settings, repurposed for indicator pass band bounds
 ;**********************************************************************
 
-    DE      (MIDPOINT - 20) ; Indicator 3 bandpass lower bound
-    DE      (MIDPOINT -  5) ; Indicator 7 bandpass lower bound
+    DE      (MIDPOINT -  5) ; Indicator 3 bandpass lower bound
+    DE      (MIDPOINT -  3) ; Indicator 7 bandpass lower bound
     DE      (MIDPOINT - 10) ; Unused
     DE      (MIDPOINT - 15) ; Unused
-    DE      MIDPOINT        ; Indicator 3 bandpass upper bound
-    DE      (MIDPOINT - 15) ; Indicator 7 bandpass upper bound
+    DE      (MIDPOINT -  5) ; Indicator 3 bandpass upper bound
+    DE      (MIDPOINT -  3) ; Indicator 7 bandpass upper bound
     DE      (MIDPOINT - 10) ; Unused
     DE      (MIDPOINT -  5) ; Unused
     DE      16              ; Unused
@@ -477,11 +481,11 @@ eeDataStart
 ; Servo 4 position and rate settings, repurposed for indicator pass band bounds
 ;**********************************************************************
 
-    DE      (MIDPOINT - 20) ; Indicator 5 bandpass lower bound
+    DE      (MIDPOINT - 17) ; Indicator 5 bandpass lower bound
     DE      (MIDPOINT -  5) ; Unused
     DE      (MIDPOINT - 10) ; Unused
     DE      (MIDPOINT - 15) ; Unused
-    DE      MIDPOINT        ; Indicator 5 bandpass upper bound
+    DE      (MIDPOINT - 17) ; Indicator 5 bandpass upper bound
     DE      (MIDPOINT - 15) ; Unused
     DE      (MIDPOINT - 10) ; Unused
     DE      (MIDPOINT -  5) ; Unused
@@ -951,13 +955,13 @@ defaultInds
 
     clrf    ind1LoWtr       ; Indicator 1 lower bound default = 0
     clrf    ind4HiWtr       ; Indicator 4 upper bound ...
-    decf    ind4HiWtr       ; ... = 255
+    decf    ind4HiWtr,F     ; ... = 255
 
     movf    srv1Off,W       ; Subtract Servo1 off position ...
     subwf   srv1On,W        ; ... from on position
 
     btfss   STATUS,C        ; Skip if off position not greater than on ...
-    goto    swapDefaults    ; ... else use off for upper bound and on for lower
+    goto    defaultSwap     ; ... else use off for upper bound and on for lower
 
     movf    srv1Off,W       ; Set Servo1 off position ...
     movwf   ind1HiWtr       ; ... as indicator 1 upper bound default
@@ -965,7 +969,7 @@ defaultInds
     movwf   ind4LoWtr       ; ... as indicator 4 lower bound default
     goto    default23       ; Set indicator 2 and 3 defaults
 
-swapDefaults
+defaultSwap
     movf    srv1On,W        ; Set Servo1 on position ...
     movwf   ind1HiWtr       ; ... as indicator 1 upper bound default
     movf    srv1Off,W       ; Set Servo1 off position ...
@@ -973,32 +977,32 @@ swapDefaults
 
 default23
 
-    ; Calculate difference between bounds 1 upper and 4 lower
-    ;******************************************************************
-
-    movf    ind1HiWtr,W     ; Subtract indicator 1 upper bound ...
-    subwf   ind4LoWtr,W     ; ... from indicator 4 lower bound
-
     ; Calculate one third the difference between bounds 1 upper and 4 lower
     ;******************************************************************
 
     clrf    ind3HiWtr       ; Temporarily use to hold result
     decf    ind3HiWtr,F     ; Decrement through zero (see loop below)
 
+    movf    ind1HiWtr,W     ; Subtract indicator 1 upper bound ...
+    subwf   ind4LoWtr,W     ; ... from indicator 4 lower bound ...
+    movwf   ind3LoWtr       ; ... store result as dividend
+
+    movlw   3               ; Set 3 as divisor
+
 defaultLoop
-    incf    ind3HiWtr,F     ; Increment result (first time increment to zero)
-    sublw   3               ; Subtract 3 from difference between bounds
+    incf    ind3HiWtr,F     ; Increment result (first time increments to zero)
+    subwf   ind3LoWtr,F     ; Subtract 3 from difference between bounds
     btfsc   STATUS,C        ; Skip if subtraction underflowed through zero ...
     goto    defaultLoop     ; ... else continue with division
 
     movf    ind1HiWtr,W     ; Indicator 1 upper bound ...
-    addwf   ind3HiWtr,W     ; ... plus a third of difference to 4 lower ...
+    addwf   ind3HiWtr,W     ; ... plus a third of difference ...
     movwf   ind2LoWtr       ; ... as indicator 2 lower bound default ...
     movwf   ind2HiWtr       ; ... and upper bound default
 
-    movf    ind4LoWtr,W     ; Indicator 4 lower bound ...
-    subwf   ind3HiWtr,W     ; ... minus a third of difference from 1 upper ...
-    movwf   ind3LoWtr       ; ... as indicator 3 lower bound default ...
+    movf    ind3HiWtr,W     ; Subtract a third of difference  ...
+    subwf   ind4LoWtr,W     ; ... from 4 lower bound for ...
+    movwf   ind3LoWtr       ; ... indicator 3 lower bound default ...
     movwf   ind3HiWtr       ; ... and upper bound default
 
     return
@@ -1034,7 +1038,7 @@ initialise
     clrf    INPORT
 
     clrf    cycleState      ; Initialise cycle state
-    movlw   DRVONMASK       ; Ensure all drive outputs ...
+    movlw   DRVONMASK       ; Ensure all drive outputs are on ...
     iorwf   sysFlags,F      ; ... and other system flags clear
 
     ; Delay an arbitray length of time to allow the inputs to settle
@@ -1320,7 +1324,6 @@ srv1SetOff3Position
     movwf   srv1Off3        ; ... as servo Off bounce 3 position
 
 received1OffPosition
-    movwf   srv1NowH        ; Set current position as received setting value
     bcf     SRV1IN          ; Set servo input off
     movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
     goto    received1Position
@@ -1352,11 +1355,13 @@ srv1SetOn3Position
     movwf   srv1On3         ; ... as servo On bounce 3 position
 
 received1OnPosition
-    movwf   srv1NowH        ; Set current position as received setting value
     bsf     SRV1IN          ; Set servo input on
     movlw   SRVONEND        ; Initial movement state is On drive shutdown
+
 received1Position
     movwf   srv1State       ; Set movement state
+    movf    temp4,W         ; Set received value ...
+    movwf   srv1NowH        ; ... as current position
     clrf    srv1NowL
     bsf     sysFlags,SRV1EN ; Enable servo drive output
     goto    receivedSetting
@@ -1748,13 +1753,13 @@ PstnIndUpdate   macro   srvPstn, indLoWtr, indHiWtr, indPort, indBit
                 local   outOfBand
 
     movf    indLoWtr,W      ; Subtract lower bound ...
-    subwf   srvPstn,F       ; ... from current position
+    subwf   srvPstn,W       ; ... from current position
 
     btfss   STATUS,C        ; Skip if current not less than lower bound ...
     goto    outOfBand       ; ... else current outside pass band
 
     movf    srvPstn,W       ; Subtract current position ...
-    subwf   indHiWtr,F      ; ... from upper bound
+    subwf   indHiWtr,W      ; ... from upper bound
 
     btfsc   STATUS,C        ; Skip if current greater than upper bound ...
     bsf     indPort,indBit  ; ... else current inside pass band, indicator on
@@ -1863,13 +1868,13 @@ ServoUpdate1
 
     ; Update position indicator outputs
 
-    PstnIndUpdate   srv1NowL, ind1LoWtr, ind1HiWtr, IND1OUT
-    PstnIndUpdate   srv1NowL, ind2LoWtr, ind2HiWtr, IND2OUT
-    PstnIndUpdate   srv1NowL, ind3LoWtr, ind3HiWtr, IND3OUT
-    PstnIndUpdate   srv1NowL, ind4LoWtr, ind4HiWtr, IND4OUT
-    PstnIndUpdate   srv1NowL, ind5LoWtr, ind5HiWtr, IND5OUT
-    PstnIndUpdate   srv1NowL, ind6LoWtr, ind6HiWtr, IND6OUT
-    PstnIndUpdate   srv1NowL, ind7LoWtr, ind7HiWtr, IND7OUT
+    PstnIndUpdate   srv1NowH, ind1LoWtr, ind1HiWtr, IND1OUT
+    PstnIndUpdate   srv1NowH, ind2LoWtr, ind2HiWtr, IND2OUT
+    PstnIndUpdate   srv1NowH, ind3LoWtr, ind3HiWtr, IND3OUT
+    PstnIndUpdate   srv1NowH, ind4LoWtr, ind4HiWtr, IND4OUT
+    PstnIndUpdate   srv1NowH, ind5LoWtr, ind5HiWtr, IND5OUT
+    PstnIndUpdate   srv1NowH, ind6LoWtr, ind6HiWtr, IND6OUT
+    PstnIndUpdate   srv1NowH, ind7LoWtr, ind7HiWtr, IND7OUT
 
     return
 
