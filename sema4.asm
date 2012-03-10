@@ -117,6 +117,9 @@
 ;       Reduced input skip timeout after receiving a position setting *
 ;       to about one second.                                          *
 ;                                                                     *
+;    10 Mar 2012 - Chris White:                                       *
+;       Removed servo1 indicator. Ouput is now used to echo Rx data.  *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
@@ -125,7 +128,7 @@
 ;             Servo3 In -> RA4|3      12|RA1 <- Servo2 In             *
 ;                        !MCLR|4      11|RA2 <- Serial Rx             *
 ;         Drive Shutoff -> RC5|5      10|RC0 -> Servo1 Out            *
-;      Servo1 Indicator <- RC4|6       9|RC1 -> Servo2 Out            *
+;             Serial Tx <- RC4|6       9|RC1 -> Servo2 Out            *
 ;            Servo4 Out <- RC3|7       8|RC2 -> Servo3 Out            *
 ;                             +---------+                             *
 ;                                                                     *
@@ -212,9 +215,6 @@ PORTCDIR    EQU    B'00100000' ; All bits outputs except 5 (Drive Shutoff)
 
 #define  OUTMASK   B'00001111' ; Mask to isolate drive enabled bits
 
-; Servo movement indication port bit definitions (active low)
-#define  SRV1IND   OUTPORT,4
-
 ; Servo extended travel selected bit definitions
 #define  SRV1XTND  srvCtrl,2
 #define  SRV2XTND  srvCtrl,3
@@ -223,8 +223,9 @@ PORTCDIR    EQU    B'00100000' ; All bits outputs except 5 (Drive Shutoff)
 
 #define  XTNDMASK  B'11001100' ; Mask to isolate extended travel selected bits
 
-; Serial RX input port bit definition
+; Serial RX IO port bit definitions
 #define  SERRXIN   PORTA,2
+#define  SERTXOUT  PORTC,4
 
 RS232BITS   EQU    B'01111111' ; RS232 8 data bits (right shifted into carry)
 
@@ -233,7 +234,7 @@ RS232BITS   EQU    B'01111111' ; RS232 8 data bits (right shifted into carry)
 
 ; RS232 delay in instruction cycles for 9K6 baud at 1MHz clock
 RXBITTIME   EQU    104         ; Delay count for 1 serial bit
-RXSTARTTIME EQU    156         ; Delay count for 1.5 serial bits
+RXSTARTTIME EQU     52         ; Delay count for half a serial bit
 
 TIMEFREEZE  EQU    100         ; Number of cycles for setting mode timeout
 TIMEDRIVE   EQU    30          ; Number of cycles till drive shutoff (1.2 Sec)
@@ -947,7 +948,8 @@ scanServoInputs
 
 ;**********************************************************************
 ; RS232 input subroutine                                              *
-;     Receives data byte into temp3, sets RXDATAIND if successful  *
+;     Receives data byte into temp3, sets RXDATAIND if successful     *
+;     Rx bit state echoed back as Tx bit                              *
 ;**********************************************************************
 dataSerRx
     bcf     RXDATAIND       ; Clear data byte received indicator
@@ -958,20 +960,31 @@ dataSerRx
     btfss   SERRXIN         ; Test for possible start bit on serial input ...
     goto    dataSerRx       ; ... else loop seeking possible serial start bit
 
+    ; Delay half a serial bit time in order to sample near middle of bit
+    DelayLoop    temp1, RXSTARTTIME
+
+    bsf     SERTXOUT        ; Set serial TX output = RS232 'space' (start bit)
+
     movlw   RS232BITS
     movwf   temp3
 
-    ; Delay one and a half serial bits time
+    ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    DelayLoop    temp1, (RXSTARTTIME - 4)
+    DelayLoop    temp1, (RXBITTIME - 8)
 
 nextSerDataBit
+    btfss   RUNMAIN         ; Skip if main program loop enabled ...
+    return                  ; ... otherwise abort
+
     bcf     STATUS,C        ; Clear carry flag in status
     btfss   SERRXIN         ; Test RX bit on serial input ...
     bsf     STATUS,C        ; ... if not set then set carry flag in status
 
-    btfss   RUNMAIN         ; Skip if main program loop enabled ...
-    return                  ; ... otherwise abort
+    ; Echo Rx bit as Tx bit
+    btfsc   STATUS,C
+    bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark'
+    btfss   STATUS,C
+    bsf     SERTXOUT        ; Set serial TX output = RS232 'space'
 
     rrf     temp3,F         ; Rotate right RS232 receive byte through carry
     btfss   STATUS,C        ; Check if not got all serial data bits ...
@@ -980,36 +993,18 @@ nextSerDataBit
 continueSerData
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    DelayLoop    temp1, (RXBITTIME - 6)
+    DelayLoop    temp1, (RXBITTIME - 13)
     goto    nextSerDataBit
 
 endSerData
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    DelayLoop    temp1, (RXBITTIME - 8)
+    DelayLoop    temp1, (RXBITTIME - 11)
 
     btfss   SERRXIN         ; Test for stop bit on serial input ...
     bsf     RXDATAIND       ; ... if found set data byte received indicator
 
-    return
-
-
-;**********************************************************************
-; ASCII digit input subroutine                                        *
-;     Receives ASCII digit into temp3, sets RXDATAIND if successful   *
-;**********************************************************************
-digitSerRx
-    call    dataSerRx       ; Receive byte via serial input
-    btfss   RXDATAIND       ; Skip if received a byte ...
-    return                  ; ... otherwise abort
-
-    ; Check received byte is an ASCII digit
-    movlw   DIGITTEST       ; Test for ASCII digit ...
-    xorwf   temp3,F         ; ... converting received byte at same time ...
-    movlw   DIGITMASK       ; Mask out lower nibble ...
-    andwf   temp3,W         ; ... of received byte ...
-    btfss   STATUS,Z        ; .. continue if ASCII digit received ...
-    bcf     RXDATAIND       ; ... otherwise mark received data as bad
+    bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark' (stop bit)
 
     return
 
@@ -1039,6 +1034,26 @@ asciiTensTable
 #if (high asciiTensTable) != (high $)
     error "Ascii tens jump table spans 8 bit boundary"
 #endif
+
+
+;**********************************************************************
+; ASCII digit input subroutine                                        *
+;     Receives ASCII digit into temp3, sets RXDATAIND if successful   *
+;**********************************************************************
+digitSerRx
+    call    dataSerRx       ; Receive byte via serial input
+    btfss   RXDATAIND       ; Skip if received a byte ...
+    return                  ; ... otherwise abort
+
+    ; Check received byte is an ASCII digit
+    movlw   DIGITTEST       ; Test for ASCII digit ...
+    xorwf   temp3,F         ; ... converting received byte at same time ...
+    movlw   DIGITMASK       ; Mask out lower nibble ...
+    andwf   temp3,W         ; ... of received byte ...
+    btfss   STATUS,Z        ; .. continue if ASCII digit received ...
+    bcf     RXDATAIND       ; ... otherwise mark received data as bad
+
+    return
 
 
 ;**********************************************************************
@@ -1113,7 +1128,13 @@ initialise
 ;**********************************************************************
 main
     ; Wait until output cycle is idle, pause between servo pulse output
+    ;
+    ; Main loop is run once per output cycle to control servo movement
+    ; speed and not during actual pulse as interrupts make serial timing
+    ; unreliable
     ;******************************************************************
+
+    bcf     SERTXOUT        ; Set serial TX output = RS232 'mark' (idle)
 
     movf    cycleState,W    ; Test pulse output cycle state
     btfss   STATUS,Z        ; Skip if pulse output cycle not running ...
@@ -1148,18 +1169,25 @@ testSerRx
     goto    testSerRx       ; ... else loop looking for serial input connected
 
 syncSerRx
+    bcf     SERTXOUT        ; Set serial TX output = RS232 'mark' (idle)
+
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
     goto    main            ; ... otherwise abort
 
     btfss   SERRXIN         ; Test for possible start bit on serial input ...
     goto    syncSerRx       ; ... else loop seeking possible serial start bit
 
+    ; Delay half a serial bit time in order to sample near middle of bit
+    DelayLoop    temp1, RXSTARTTIME
+
+    bsf     SERTXOUT        ; Set serial TX output = RS232 'space' (start bit)
+
     movlw   RS232BITS
     movwf   temp3
 
-    ; Delay one and a half serial bits time
+    ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles from RX bit read to here
-    DelayLoop    temp1, (RXSTARTTIME - 4)
+    DelayLoop    temp1, (RXBITTIME - 5)
 
     ; Data sequence starts with a null Synchronisation byte,
     ; eight bits of high (RS232 'space')
@@ -1184,10 +1212,12 @@ nextSerSyncBit
 endSerSync
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles from RX read to here
-    DelayLoop    temp1, (RXBITTIME - 8)
+    DelayLoop    temp1, (RXBITTIME - 7)
 
     btfsc   SERRXIN         ; Test for stop bit on serial input ...
     goto    syncSerRx       ; ... otherwise not receiving null, start again
+
+    bcf     SERTXOUT        ; Set serial TX output = RS232 'mark' (stop bit)
 
     ; Synchronised to null byte, receive command (1 byte) and value (3 bytes)
     ;******************************************************************
@@ -1911,16 +1941,6 @@ updateSrv1On
 
 ServoUpdate1
     ServoUpdate    srv1State, srv1Off, srv1NowL, SRV1EN
-
-    movlw   SRVMVMASK       ; Mask non movement states bits ...
-    andwf   srv1State,W     ; ... from servo movement state
-    btfss   STATUS,Z        ; Skip if movement complete ...
-    goto    updateSrv2      ; ... otherwise skip indication output
-
-    btfsc   SRV1IN          ; Skip if input off ...
-    bcf     SRV1IND         ; ... else set on movement completed indication
-    btfss   SRV1IN          ; Skip if input on ...
-    bsf     SRV1IND         ; ... else set off movement completed indication
 
 updateSrv2
     btfsc   SRV2IN          ; Skip if input off ...
