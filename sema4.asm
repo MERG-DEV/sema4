@@ -120,6 +120,11 @@
 ;    10 Mar 2012 - Chris White:                                       *
 ;       Removed servo1 indicator. Ouput is now used to echo Rx data.  *
 ;                                                                     *
+;    29 Apr 2012 - Chris White:                                       *
+;       Modified speed setting to be compatible with Servo4g          *
+;       (0 - fastest, 255 - slowest). Added banner message output on  *
+;       startup. Added reboot command, "!".                           *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
@@ -233,7 +238,7 @@ RS232BITS   EQU    B'01111111' ; RS232 8 data bits (right shifted into carry)
 ;**********************************************************************
 
 ; RS232 delay in instruction cycles for 9K6 baud at 1MHz clock
-RXBITTIME   EQU    104         ; Delay count for 1 serial bit
+SRLBITTIME  EQU    104         ; Delay count for 1 serial bit
 RXSTARTTIME EQU     52         ; Delay count for half a serial bit
 
 TIMEFREEZE  EQU    100         ; Number of cycles for setting mode timeout
@@ -301,8 +306,12 @@ DIGITTEST   EQU    '0'      ; Test pattern for ASCII digit after applying mask
 
 RESETCMND   EQU    '#'      ; Reset settings from EEPROM
 RUNCMND     EQU    '$'      ; Exit setting mode
+REBOOTCMND  EQU    '!'
 STORECMND   EQU    '@'      ; Store current settings to EEPROM
 COMMANDBASE EQU    'A'      ; Base character for first setting value
+
+LINEFEED    EQU     0x0A
+CRG_RTRN    EQU     0x0D
 
 
 ;**********************************************************************
@@ -917,8 +926,8 @@ DelayLoop  macro    delayCounter, delayValue
 
            local    loopDelay
 
-#if (6 < delayValue)
-    movlw  ((delayValue - 1) / 3)
+#if (4 < delayValue)
+    movlw  ((delayValue - 2) / 3)
 #else
     movlw  1
 #endif
@@ -951,14 +960,14 @@ scanServoInputs
 ;     Receives data byte into temp3, sets RXDATAIND if successful     *
 ;     Rx bit state echoed back as Tx bit                              *
 ;**********************************************************************
-dataSerRx
+dataSrlRx
     bcf     RXDATAIND       ; Clear data byte received indicator
 
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
     return                  ; ... otherwise abort
 
     btfss   SERRXIN         ; Test for possible start bit on serial input ...
-    goto    dataSerRx       ; ... else loop seeking possible serial start bit
+    goto    dataSrlRx       ; ... else loop seeking possible serial start bit
 
     ; Delay half a serial bit time in order to sample near middle of bit
     DelayLoop    temp1, RXSTARTTIME
@@ -970,9 +979,9 @@ dataSerRx
 
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    DelayLoop    temp1, (RXBITTIME - 8)
+    DelayLoop    temp1, (SRLBITTIME - 7)
 
-nextSerDataBit
+nextSrlRxBit
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
     return                  ; ... otherwise abort
 
@@ -988,23 +997,64 @@ nextSerDataBit
 
     rrf     temp3,F         ; Rotate right RS232 receive byte through carry
     btfss   STATUS,C        ; Check if not got all serial data bits ...
-    goto    endSerData      ; ... otherwise look for stop bit
+    goto    endSrlRx      ; ... otherwise look for stop bit
 
-continueSerData
+continueSrlRx
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    DelayLoop    temp1, (RXBITTIME - 13)
-    goto    nextSerDataBit
+    DelayLoop    temp1, (SRLBITTIME - 14)
+    goto    nextSrlRxBit
 
-endSerData
+endSrlRx
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    DelayLoop    temp1, (RXBITTIME - 11)
+    DelayLoop    temp1, (SRLBITTIME - 10)
 
     btfss   SERRXIN         ; Test for stop bit on serial input ...
     bsf     RXDATAIND       ; ... if found set data byte received indicator
 
     bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark' (stop bit)
+
+    return
+
+
+;**********************************************************************
+; RS232 output subroutine                                             *
+;     Transmits data byte from acumulator                             *
+;**********************************************************************
+dataSrlTx
+    movwf   temp3
+
+    movlw   RS232BITS
+    movwf   temp2
+
+    bsf     SERTXOUT        ; Set serial TX output = RS232 'space' (start bit)
+
+    ; Delay one serial bit time
+    ; Adjust delay value to allow for clock cycles between TX writes
+    DelayLoop    temp1, (SRLBITTIME - 4)
+
+nextSrlTxBit
+    rrf     temp3,F         ; Rotate right RS232 transmit byte through carry
+
+    btfsc   STATUS,C
+    bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark'
+    btfss   STATUS,C
+    bsf     SERTXOUT        ; Set serial TX output = RS232 'space'
+
+    ; Delay one serial bit time
+    ; Adjust delay value to allow for clock cycles between TX writes
+    DelayLoop    temp1, (SRLBITTIME - 9)
+
+    rrf     temp2,F         ; Rotate right RS232 transmit count through carry
+    btfsc   STATUS,C        ; Check if sent all serial data bits ...
+    goto    nextSrlTxBit    ; ... otherwise send next bit
+
+endSrlTx
+    bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark' (stop bit)
+
+    ; Delay two serial bit times
+    DelayLoop    temp1, (SRLBITTIME * 2)
 
     return
 
@@ -1040,8 +1090,8 @@ asciiTensTable
 ; ASCII digit input subroutine                                        *
 ;     Receives ASCII digit into temp3, sets RXDATAIND if successful   *
 ;**********************************************************************
-digitSerRx
-    call    dataSerRx       ; Receive byte via serial input
+digitSrlRx
+    call    dataSrlRx       ; Receive byte via serial input
     btfss   RXDATAIND       ; Skip if received a byte ...
     return                  ; ... otherwise abort
 
@@ -1085,14 +1135,35 @@ initialise
     clrf    OUTPORT
     clrf    INPORT
 
+    ; Initialise states and settings
+    ;******************************************************************
+
     clrf    cycleState      ; Initialise cycle state
     movlw   DRVONMASK       ; Ensure all drive outputs ...
     iorwf   sysFlags,F      ; ... and other system flags clear
 
-    ; Delay an arbitray length of time to allow the inputs to settle
+    call    loadAllSettings ; Load all settings from EEPROM
+
+    ; Output banner message
+    ;******************************************************************
+
+    bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark' (idle)
+
+    ; Delay an arbitray length of time to allow things to settle
     DelayLoop    temp1, 0xFF
 
-    call    loadAllSettings ; Load all settings from EEPROM
+    movlw   'S'
+    call    dataSrlTx
+    movlw   'e'
+    call    dataSrlTx
+    movlw   'm'
+    call    dataSrlTx
+    movlw   'a'
+    call    dataSrlTx
+    movlw   '4'
+    call    dataSrlTx
+    movlw   'd'
+    call    dataSrlTx
 
     ; Set interrupt intervals for output cycles and pulse timing
     ;******************************************************************
@@ -1161,21 +1232,21 @@ skipInputs
     ; Check for reception of serial data
     ;******************************************************************
 
-testSerRx
+testSrlRx
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
     goto    main            ; ... otherwise abort
 
     btfsc   SERRXIN         ; Test for serial input connected ...
-    goto    testSerRx       ; ... else loop looking for serial input connected
+    goto    testSrlRx       ; ... else loop looking for serial input connected
 
-syncSerRx
+syncSrlRx
     bcf     SERTXOUT        ; Set serial TX output = RS232 'mark' (idle)
 
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
     goto    main            ; ... otherwise abort
 
     btfss   SERRXIN         ; Test for possible start bit on serial input ...
-    goto    syncSerRx       ; ... else loop seeking possible serial start bit
+    goto    syncSrlRx       ; ... else loop seeking possible serial start bit
 
     ; Delay half a serial bit time in order to sample near middle of bit
     DelayLoop    temp1, RXSTARTTIME
@@ -1187,35 +1258,35 @@ syncSerRx
 
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles from RX bit read to here
-    DelayLoop    temp1, (RXBITTIME - 5)
+    DelayLoop    temp1, (SRLBITTIME - 5)
 
     ; Data sequence starts with a null Synchronisation byte,
     ; eight bits of high (RS232 'space')
     ;******************************************************************
 
-nextSerSyncBit
+nextSrlSyncBit
     btfss   SERRXIN         ; Test for sync byte bit on serial input ...
-    goto    syncSerRx       ; ... otherwise not receiving null, start again
+    goto    syncSrlRx       ; ... otherwise not receiving null, start again
 
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
     goto    main            ; ... otherwise abort
 
     rrf     temp3,F         ; Rotate right RS232 receive byte through carry
     btfss   STATUS,C        ; Skip if not yet got all serial data bits ...
-    goto    endSerSync      ; ... else look for stop bit
+    goto    endSrlSync      ; ... else look for stop bit
 
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles from RX bit read to here
-    DelayLoop    temp1, (RXBITTIME - 7)
-    goto    nextSerSyncBit
+    DelayLoop    temp1, (SRLBITTIME - 7)
+    goto    nextSrlSyncBit
 
-endSerSync
+endSrlSync
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles from RX read to here
-    DelayLoop    temp1, (RXBITTIME - 7)
+    DelayLoop    temp1, (SRLBITTIME - 7)
 
     btfsc   SERRXIN         ; Test for stop bit on serial input ...
-    goto    syncSerRx       ; ... otherwise not receiving null, start again
+    goto    syncSrlRx       ; ... otherwise not receiving null, start again
 
     bcf     SERTXOUT        ; Set serial TX output = RS232 'mark' (stop bit)
 
@@ -1225,12 +1296,12 @@ endSerSync
     ; Receive command code
     ;******************************************************************
 
-    call    dataSerRx       ; Receive byte via serial input
+    call    dataSrlRx       ; Receive byte via serial input
     btfss   RXDATAIND       ; Skip if received a byte ...
-    goto    syncSerRx       ; ... otherwise abort
+    goto    syncSrlRx       ; ... otherwise abort
 
     btfsc   temp3,ASCIIBIT  ; Test received byte is an ASCII character ...
-    goto    syncSerRx       ; ... otherwise abort
+    goto    syncSrlRx       ; ... otherwise abort
 
     movf    temp3,W         ; Save received byte ...
     movwf   temp2           ; ... as command
@@ -1238,12 +1309,12 @@ endSerSync
     ; Receive first digit of value for command, hundreds
     ;******************************************************************
 
-    call    digitSerRx      ; Receive digit via serial input
+    call    digitSrlRx      ; Receive digit via serial input
     btfss   RXDATAIND       ; Skip if received a digit ...
-    goto    syncSerRx       ; ... otherwise abort
+    goto    syncSrlRx       ; ... otherwise abort
 
     ; Initialise command value with hundreds digit, can only be 0, 100, or 200
-    clrw                    ; Assume 0
+    clrw                    ; Start with 0
     btfsc   temp3,0         ; Skip if not 100 ...
     movlw   100             ; ... else set to 100
     btfsc   temp3,1         ; Skip if not 200 ...
@@ -1253,9 +1324,9 @@ endSerSync
     ; Receive second digit of value for command, tens
     ;******************************************************************
 
-    call    digitSerRx      ; Receive digit via serial input
+    call    digitSrlRx      ; Receive digit via serial input
     btfss   RXDATAIND       ; Skip if received a digit ...
-    goto    syncSerRx       ; ... otherwise abort
+    goto    syncSrlRx       ; ... otherwise abort
 
     ; Add tens digit to command value
     call    asciiTens
@@ -1264,9 +1335,9 @@ endSerSync
     ; Receive third digit of value for command, units
     ;******************************************************************
 
-    call    digitSerRx      ; Receive digit via serial input
+    call    digitSrlRx      ; Receive digit via serial input
     btfss   RXDATAIND       ; Skip if received a digit ...
-    goto    syncSerRx       ; ... otherwise abort
+    goto    syncSrlRx       ; ... otherwise abort
 
     movf    temp3,W
     addwf   temp4,F         ; Add units digit to command value
@@ -1426,17 +1497,19 @@ received1Position
     bsf     sysFlags,SRV1EN ; Enable servo drive output
     goto    receivedSetting
 
-srv1NewOffRate
-    swapf   temp4,F         ; Negate effect of following nibble swap
 srv1SetOffRate
-    swapf   temp4,W         ; Store received value (x16 by nibble swap) ...
+    call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
+    movwf   temp4
+srv1NewOffRate
+    comf    temp4,W         ; Store complement of received value ...
     movwf   srv1OffRate     ; ... as servo Off rate
     goto    receivedRate
 
-srv1NewOnRate
-    swapf   temp4,F         ; Negate effect of following nibble swap
 srv1SetOnRate
-    swapf   temp4,W         ; Store received value (x16 by nibble swap) ...
+    call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
+    movwf   temp4
+srv1NewOnRate
+    comf    temp4,W         ; Store complement of received value ...
     movwf   srv1OnRate      ; ... as servo On rate
     goto    receivedRate
 
@@ -1506,17 +1579,19 @@ received2Position
     bsf     sysFlags,SRV2EN ; Enable servo drive output
     goto    receivedSetting
 
-srv2NewOffRate
-    swapf   temp4,F         ; Negate effect of following nibble swap
 srv2SetOffRate
-    swapf   temp4,W         ; Store received value (x16 by nibble swap) ...
+    call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
+    movwf   temp4
+srv2NewOffRate
+    comf    temp4,W         ; Store complement of received value ...
     movwf   srv2OffRate     ; ... as servo Off rate
     goto    receivedRate
 
-srv2NewOnRate
-    swapf   temp4,F         ; Negate effect of following nibble swap
 srv2SetOnRate
-    swapf   temp4,W         ; Store received value (x16 by nibble swap) ...
+    call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
+    movwf   temp4
+srv2NewOnRate
+    comf    temp4,W         ; Store complement of received value ...
     movwf   srv2OnRate      ; ... as servo On rate
     goto    receivedRate
 
@@ -1586,18 +1661,20 @@ received3Position
     bsf     sysFlags,SRV3EN ; Enable servo drive output
     goto    receivedSetting
 
-srv3NewOffRate
-    swapf   temp4,F         ; Negate effect of following nibble swap
 srv3SetOffRate
-    swapf   temp4,W         ; Store received value (x16 by nibble swap) ...
+    call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
+    movwf   temp4
+srv3NewOffRate
+    comf    temp4,W         ; Store complement of received value ...
     movwf   srv3OffRate     ; ... as servo Off rate
     goto    receivedRate
 
-srv3NewOnRate
-    swapf   temp4,F         ; Negate effect of following nibble swap
 srv3SetOnRate
-    swapf   temp4,W         ; Store received value (x16 by nibble swap) ...
-    movwf   srv3OnRate      ; ... as servo On Rate
+    call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
+    movwf   temp4
+srv3NewOnRate
+    comf    temp4,W         ; Store complement of received value ...
+    movwf   srv3OnRate      ; ... as servo On rate
     goto    receivedRate
 
 srv4SetOffPosition
@@ -1666,17 +1743,19 @@ received4Position
     bsf     sysFlags,SRV4EN ; Enable servo drive output
     goto    receivedSetting
 
-srv4NewOffRate
-    swapf   temp4,F         ; Negate effect of following nibble swap
 srv4SetOffRate
-    swapf   temp4,W         ; Store received value (x16 by nibble swap) ...
+    call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
+    movwf   temp4
+srv4NewOffRate
+    comf    temp4,W         ; Store complement of received value ...
     movwf   srv4OffRate     ; ... as servo Off rate
     goto    receivedRate
 
-srv4NewOnRate
-    swapf   temp4,F         ; Negate effect of following nibble swap
 srv4SetOnRate
-    swapf   temp4,W         ; Store received value (x16 by nibble swap) ...
+    call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
+    movwf   temp4
+srv4NewOnRate
+    comf    temp4,W         ; Store complement of received value ...
     movwf   srv4OnRate      ; ... as servo On rate
 
     ; Common end action for rate setting command
@@ -1687,7 +1766,7 @@ receivedRate
 
     clrf    freezeTime      ; Clear setting mode timeout (read physical inputs)
 
-    goto    syncSerRx       ; Loop looking for more serial data
+    goto    syncSrlRx       ; Loop looking for more serial data
 
     ; Common end action for position setting command
     ;******************************************************************
@@ -1698,7 +1777,7 @@ receivedSetting
     movlw   TIMEFREEZE      ; Set setting mode timeout (ignore physical inputs)
     movwf   freezeTime
 
-    goto    syncSerRx       ; Loop looking for more serial data
+    goto    syncSrlRx       ; Loop looking for more serial data
 
     ; Received servo extended travel selections
     ;******************************************************************
@@ -1710,7 +1789,7 @@ receivedXtnd
     andlw   XTNDMASK        ; Isolate received servo option selections
     iorwf   srvCtrl,F       ; Set servo option selections
 
-    goto    syncSerRx       ; Loop looking for more serial data
+    goto    syncSrlRx       ; Loop looking for more serial data
 
     ; Actions for commands other than position or rate setting
     ;******************************************************************
@@ -1719,19 +1798,19 @@ receivedCommand
     movf    temp2,W         ; Test if command ...
     xorlw   RUNCMND         ; ... is to exit setting mode ...
     btfss   STATUS,Z        ; ... if so skip ...
-    goto    receivedStore   ; ... otherwise test for store command
+    goto    testForStore    ; ... otherwise test for store command
 
     clrf    freezeTime      ; Clear setting mode timeout (read physical inputs)
-    goto    syncSerRx       ; Loop looking for more serial data
+    goto    syncSrlRx       ; Loop looking for more serial data
 
-receivedStore
+testForStore
     movf    temp2,W         ; Test if command ...
     xorlw   STORECMND       ; ... is to store settings ...
     btfss   STATUS,Z        ; ... if so skip ...
-    goto    receivedReset   ; ... otherwise test for reset command
+    goto    testForReset    ; ... otherwise test for reset command
 
     btfsc   SYNCEDIND       ; Skip if settings not synchronised with EEPROM ...
-    goto    syncSerRx       ; ... else loop looking for more serial data
+    goto    syncSrlRx       ; ... else loop looking for more serial data
 
     ; Store settings to EEPROM
     ;******************************************************************
@@ -1755,18 +1834,50 @@ storeSetting
 
     bsf     SYNCEDIND       ; Set servo settings synchronised indicator
 
-    goto    syncSerRx       ; Loop looking for more serial data
+    goto    syncSrlRx       ; Loop looking for more serial data
 
-receivedReset
+testForReset
     movf    temp2,W         ; Test if command ...
     xorlw   RESETCMND       ; ... is to reset settings ...
     btfss   STATUS,Z        ; ... if so skip ...
-    goto    syncSerRx       ; ... otherwise abort
+    goto    testForReboot   ; ... otherwise test for reboot command
 
     btfss   SYNCEDIND       ; Skip if settings synchronised with EEPROM ...
     call    loadAllSettings ; ... else restore all settings from EEPROM
 
-    goto    syncSerRx       ; Loop looking for more serial data
+testForReboot
+    movf    temp2,W         ; Test if command ...
+    xorlw   REBOOTCMND      ; ... is to reboot ...
+    btfsc   STATUS,Z        ; ... if not skip ...
+    goto    bootVector      ; ... otherwise reboot
+
+    goto    syncSrlRx       ; Loop looking for more serial data
+
+
+;**********************************************************************
+; Servo4 speed conversion subroutine                                  *
+;     Servo4 speed in temp4                                           *
+;     Sema4 speed returned in W                                       *
+;**********************************************************************
+convertSpeed
+    SetPCLATH speedTable
+    movlw   0x0F
+    andwf   temp4,W
+    addwf   PCL,F
+
+speedTable
+    retlw  0x00
+    retlw  0x5F
+    retlw  0x7F
+    retlw  0x9F
+    retlw  0xBF
+    retlw  0xCF
+    retlw  0xDF
+    retlw  0xEF
+
+#if (high speedTable) != (high $)
+    error "Speed conversion jump table spans 8 bit boundary"
+#endif
 
 
 ;**********************************************************************
@@ -2008,10 +2119,6 @@ ServoUpdate4
 ;     Return STATUS,Z set when target positions reached               *
 ;**********************************************************************
 updateServo
-    movf    temp2,F         ; Test rate ...
-    btfsc   STATUS,Z        ; ... skip if not zero ...
-    goto    moveImmediate   ; ... else set current position to target
-
     ; Test target position against current position
     ; (result used later for increment/decrement jump)
     movwf   temp3           ; Current high byte in temp3
@@ -2083,12 +2190,6 @@ incrementServo
 
     return
 
-moveImmediate
-    ; Already reached target position
-    ;******************************************************************
-
-    incf    FSR,F           ; Address current position high byte
-
 targetPassed
     ; Limit current position to target position
     ;******************************************************************
@@ -2100,6 +2201,8 @@ targetPassed
 
     return                  ; STATUS,Z set by preceeding clear
 
-
+#if ($) > (GETOSCCAL)
+    error "Program code overwrites OSCAL value"
+#endif
 
     end
