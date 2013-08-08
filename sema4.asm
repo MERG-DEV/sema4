@@ -1069,7 +1069,7 @@ initialise
     call    dataSrlTx
     movlw   '4'
     call    dataSrlTx
-    movlw   'e'
+    movlw   'f'
     call    dataSrlTx
 
     ; Set interrupt intervals for output cycles and pulse timing
@@ -1954,13 +1954,13 @@ nextSrlRxBit
 continueSrlRx
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    DelayLoop    temp1, (SRLBITTIME - 17)
+    DelayLoop    temp1, (SRLBITTIME - 16)
     goto    nextSrlRxBit
 
 endSrlRx
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    DelayLoop    temp1, (SRLBITTIME - 17)
+    DelayLoop    temp1, (SRLBITTIME - 16)
 
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
     return                  ; ... otherwise abort
