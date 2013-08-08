@@ -604,7 +604,7 @@ ServoOffState  macro    servoState
 ; Macro: Servo current position update                                *
 ;     Rate (speed) passed in W                                        *
 ;**********************************************************************
-ServoUpdate  macro    srvState, srvSettings, srvNow, SRVEN
+ServoUpdate  macro    srvState, srvSettings, srvNowL, SRVEN
 
     local   checkTimer, state3or2, loadTimer, runTimer, state1or0, endUpdate
 
@@ -621,14 +621,14 @@ ServoUpdate  macro    srvState, srvSettings, srvNow, SRVEN
     bsf     sysFlags,SRVEN  ; Ensure servo drive is enabled
 
     movlw   srvSettings     ; Servo settings base address ...
-    movwf   temp1           ; ... in temp1
+    movwf   FSR             ; ... into indirect addressing register
     movf    srvState,W      ; Servo current state in W
-    call    getServoTarget  ; Get servo target position for current state
+    call    getServoTarget  ; Get servo current state target position in temp1
 
-    movlw   srvNow          ; Load servo current position address ...
+    movlw   srvNowL         ; Load servo current position low byte address ...
     movwf   FSR             ; ... into indirect addressing register
 
-    movf    (srvNow + 1),W  ; W servo current position high byte
+    movf    (srvNowL + 1),W ; W servo current position high byte
 
     call    updateServo     ; Update servo current position
 
@@ -649,11 +649,11 @@ state3or2
 
 loadTimer
     movlw   TIMEDRIVE
-    movwf   srvNow          ; Load drive shutoff timer
+    movwf   srvNowL         ; Load drive shutoff timer
     decf    srvState,F      ; Advance to next state, 2 or 1
 
 runTimer
-    decfsz  srvNow,F        ; Decrement timer, skip if expired ...
+    decfsz  srvNowL,F       ; Decrement timer, skip if expired ...
     goto    endUpdate       ; ... else remain in same state
 
     btfss   srvState,0      ; Skip if state 1 - disable drive if selected ...
@@ -974,10 +974,10 @@ speedTable
 
 ;**********************************************************************
 ; Servo setting position offset for state lookup subroutine           *
-;     Servo movement state passed in temp3 (bits 7 to 2)              *
+;     Servo movement state passed in temp1 (bits 7 to 2)              *
 ;                                                                     *
 ;     Setting offset returned in W                                    *
-;     temp3 divided by two because of rotation right                  *
+;     temp1 (state) divided by two because of rotation one bit right  *
 ;**********************************************************************
 getServoSettingOffset
     SetPCLATH settingOffsetTable
@@ -991,8 +991,8 @@ getServoSettingOffset
     ; 4 states at each position to allow time for servo to physically catch up
     ; 4 cycle times before next movement actually starts = 80 mSec
 
-    rrf     temp3,F
-    rrf     temp3,W
+    rrf     temp1,F
+    rrf     temp1,W
     andlw   SRVLUMASK
     addwf   PCL,F
 
@@ -2041,19 +2041,20 @@ digitSrlRx
 ;**********************************************************************
 ; Servo position setting for state lookup subroutine                  *
 ;     Servo movement state passed in W                                *
-;     Servo settings base address passed in temp1                     *
+;     Servo settings base address passed in FSR                       *
 ;                                                                     *
 ;     Servo target position returned in temp1                         *
 ;**********************************************************************
 getServoTarget
-    movwf   temp3               ; Servo movement state in temp2
+    movwf   temp1               ; Save servo movement state in temp1
     call    getServoSettingOffset
-    addwf   temp1,W             ; Add servo settings base address to offset
-    btfsc   temp3,SRVLUDIR      ; Skip if in Off movement sequence ...
-    addlw   (srv1On - srv1Off)  ; ... else adjust setting address
-    movwf   FSR                 ; Indirectly get ...
-    movf    INDF,W              ; ... servo setting
-    movwf   temp1               ; Servo target position in temp1
+    btfsc   temp1,SRVLUDIR      ; Skip if in Off movement sequence ...
+    addlw   (srv1On - srv1Off)  ; ... else adjust offset to On settings
+
+    addwf   FSR,F               ; Add offset to servo settings base address
+    movf    INDF,W              ; Indirectly get servo setting
+    movwf   temp1               ; Store servo target position in temp1
+
     return
 
 
