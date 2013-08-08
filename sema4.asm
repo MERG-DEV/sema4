@@ -2147,9 +2147,7 @@ ServoUpdate4
 updateServo
     ; Test target position against current position
     ; (result used later for increment/decrement jump)
-    movwf   temp3           ; Current high byte in temp3
-    movf    temp1,W         ; Target position in W
-    subwf   temp3,W         ; Current high byte - target position
+    subwf   temp1,W         ; Target position - current position high byte
 
     ; Multiply 8 bit rate by 16 to give 16 bit value
     ;  Original 8 bit rate: Rate[7-4][3-0]
@@ -2160,37 +2158,8 @@ updateServo
     swapf   temp2,W         ; Swap nibbles, gives times 16 but mixed up
     andlw   0xF0            ; Isolate low byte nibble
 
-    btfss   STATUS,C        ; Skip if target position not greater than current
-    goto    incrementServo
-
-decrementServo
-    ; Subtract rate from current position
-    ;******************************************************************
-
-    subwf   INDF,F          ; Subtract rate low from current position low
-
-    btfss   STATUS,C        ; Check no borrow from low byte subtraction ...
-    incf    temp3,F         ; ... else adjust rate high byte
-
-    incf    FSR,F           ; Address current position high byte
-
-    movf    temp3,W         ; Subtract rate high byte ...
-    subwf   INDF,F          ; ... from current position high
-
-    bcf     STATUS,Z        ; Clear STATUS,Z = target position not reached
-
-    btfss   STATUS,C        ; Skip if no underflow on high byte subtraction ...
-    goto    targetPassed    ; ... else limit to target position
-
-    movf    temp1,W         ; Target position in W
-    subwf   INDF,W          ; Current high byte - target position
-    btfss   STATUS,C        ; Skip if target not greater than current ...
-    goto    targetPassed    ; ... else limit to target position
-
-    decf    FSR,F           ; Address current position low byte
-    iorwf   INDF,W          ; STATUS,Z set if exactly at target
-
-    return
+    btfss   STATUS,C        ; Skip if current <= target ...
+    goto    decrementServo  ; ... else current > target
 
 incrementServo
     ; Add rate to current position
@@ -2201,22 +2170,45 @@ incrementServo
     btfsc   STATUS,C        ; Check no carry from low byte addition ...
     incf    temp3,F         ; ... else adjust rate high byte
 
-    incf    FSR,F           ; Address current position high byte
+    incf    FSR,F           ; Address current position high
 
-    movf    temp3,W         ; Add rate high byte ...
+    movf    temp3,W         ; Add rate high ...
     addwf   INDF,F          ; ... to current position high
 
     btfsc   STATUS,C        ; Skip if no overflow on high byte addition ...
-    goto    targetPassed    ; ... else limit to target position
+    goto    reachedTarget   ; ... else passed 255, limit to target position
 
     movf    temp1,W         ; Target position in W
     subwf   INDF,W          ; Current high byte - target position
-    btfsc   STATUS,C        ; Skip if target greater than current ...
-    goto    targetPassed    ; ... else limit to target position
+    btfsc   STATUS,C        ; Skip if target > current ...
+    goto    reachedTarget   ; ... else limit to target position
 
-    return
+    return                  ; Not yet passed, or reached, target
 
-targetPassed
+decrementServo
+    ; Subtract rate from current position
+    ;******************************************************************
+
+    subwf   INDF,F          ; Subtract rate low from current position low
+
+    btfss   STATUS,C        ; Check if no borrow from low byte subtraction ...
+    incf    temp3,F         ; ... else adjust rate high byte
+
+    incf    FSR,F           ; Address current position high
+
+    movf    temp3,W         ; Subtract rate high ...
+    subwf   INDF,F          ; ... from current position high
+
+    btfss   STATUS,C        ; Skip if no underflow on high byte subtraction ...
+    goto    reachedTarget   ; ... else limit to target position
+
+    movf    temp1,W         ; Target position in W
+    subwf   INDF,W          ; Current high byte - target position
+    bcf     STATUS,Z        ; Clear STATUS,Z == target position not reached
+    btfsc   STATUS,C        ; Skip if target > current ...
+    return                  ; ... else not yet passed, or reached, target
+
+reachedTarget
     ; Limit current position to target position
     ;******************************************************************
 
