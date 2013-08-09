@@ -712,14 +712,21 @@ beginCycle
     addwf   TMR0,F          ; Reload interrupt interval till cycle start
 
 runCycle
+    bcf     T1CON,TMR1ON    ; Ensure timer1 not running
+    bcf     PIR1,TMR1IF     ; Clear the timer1 interrupt bitflag
+
     movlw   ~OUTMASK
     andwf   portCval,F      ; Turn off all servo control outputs
 
-    bcf     T1CON,TMR1ON    ; Ensure timer1 not running
+    btfss   sysFlags,SRV1EN ; Skip if servo 1 drive is enabled ...
+    bsf     SRV1OUT         ; ... else turn on servo 1 control output
+    btfss   sysFlags,SRV2EN ; Skip if servo 2 drive is enabled ...
+    bsf     SRV2OUT         ; ... else turn on servo 2 control output
+    btfss   sysFlags,SRV3EN ; Skip if servo 3 drive is enabled ...
+    bsf     SRV3OUT         ; ... else turn on servo 3 control output
+    btfss   sysFlags,SRV4EN ; Skip if servo 4 drive is enabled ...
+    bsf     SRV4OUT         ; ... else turn on servo 4 control output
 
-    bcf     PIR1,TMR1IF     ; Clear the timer1 interrupt bitflag
-
-skipPulse
     incf    cycleState,F    ; Advance to next state
 
     SetPCLATH cycleStateTable
@@ -732,11 +739,14 @@ cycleStateTable
     goto    srv2Pulse
     goto    srv3Pulse
     goto    srv4Pulse
-    goto    cycleEnd
+    clrf    cycleState      ; End of cycle, reset cycle state
 
 #if (high cycleStateTable) != (high $)
     error "Interrupt cycle state jump table spans 8 bit boundary"
 #endif
+
+    goto    endISR
+
 
 ; Duration of servo pulses are timed using timer1. This is a 16 bit counter
 ; configured to increment and generate an interrupt on roll over from
@@ -854,10 +864,7 @@ endISR
 srv1Pulse
     bcf     RUNMAIN         ; Disable main program loop
 
-    btfss   sysFlags,SRV1EN ; Skip if servo 1 drive is enabled ...
-    goto    skipPulse       ; ... else skip pulse for servo 1
-
-    bsf     SRV1OUT         ; Start servo 1 pulse
+    bsf     SRV1OUT         ; Turn on servo 1 control output
 
     movf    srv1NowH,W      ; Get high byte of duration for position ...
     movwf   TMR1L           ; ... and save in low byte of timer1
@@ -869,10 +876,7 @@ srv1Pulse
     goto    xtndPulse
 
 srv2Pulse
-    btfss   sysFlags,SRV2EN ; Skip if servo 2 drive is enabled ...
-    goto    skipPulse       ; ... else skip pulse for servo 2
-
-    bsf     SRV2OUT         ; Start servo 2 pulse
+    bsf     SRV2OUT         ; Turn on servo 2 control output
 
     movf    srv2NowH,W      ; Get high byte of duration for position ...
     movwf   TMR1L           ; ... and save in low byte of timer1
@@ -884,10 +888,7 @@ srv2Pulse
     goto    xtndPulse
 
 srv3Pulse
-    btfss   sysFlags,SRV3EN ; Skip if servo 3 drive is enabled ...
-    goto    skipPulse       ; ... else skip pulse for servo 3
-
-    bsf     SRV3OUT         ; Start servo 3 pulse
+    bsf     SRV3OUT         ; Turn on servo 3 control output
 
     movf    srv3NowH,W      ; Get high byte of duration for position ...
     movwf   TMR1L           ; ... and save in low byte of timer1
@@ -899,10 +900,7 @@ srv3Pulse
     goto    xtndPulse
 
 srv4Pulse
-    btfss   sysFlags,SRV4EN ; Skip if servo 4 drive is enabled ...
-    goto    skipPulse       ; ... else skip pulse for servo 4
-
-    bsf     SRV4OUT         ; Start servo 4 pulse
+    bsf     SRV4OUT         ; Turn on servo 4 control output
 
     movf    srv4NowH,W      ; Get high byte of duration for position ...
     movwf   TMR1L           ; ... and save in low byte of timer1
@@ -912,11 +910,6 @@ srv4Pulse
     btfss   SRV4XTND        ; Skip if servo 4 extended travel is selected
     goto    nrmlPulse
     goto    xtndPulse
-
-cycleEnd
-    clrf    cycleState      ; End of cycle, reset cycle state
-
-    goto    endISR
 
 
 ;**********************************************************************
@@ -1051,13 +1044,13 @@ initialise
     movlw   DRVONMASK       ; Ensure all drive outputs enabled ...
     iorwf   sysFlags,F      ; ... and other system flags clear
 
+    ; Delay an arbitray length of time to allow things to settle
+    DelayLoop    temp1, 0xFF
+
     call    loadAllSettings ; Load all settings from EEPROM
 
     ; Output banner message
     ;******************************************************************
-
-    ; Delay an arbitray length of time to allow things to settle
-    DelayLoop    temp1, 0xFF
 
     movlw   'S'
     call    dataSrlTx
@@ -1798,9 +1791,6 @@ waitReadEE
 ; Load settings from EEPROM subroutine                                *
 ;**********************************************************************
 loadAllSettings
-    movf    srvCtrl,W       ; Save current servo control flags ...
-    movwf   temp4           ; ... in temp4
-
     movlw   NUMSETTINGS
     movwf   temp1           ; Set index of settings to be read from EEPROM
 
@@ -1817,18 +1807,8 @@ loadSetting
     decfsz  temp1,F         ; Decrement settings count, skip if zero ...
     goto    loadSetting     ; ... else loop until all settings have been read
 
-    ; Restore current servo control flags other than restored option selections
-    iorlw   XTNDMASK        ; Protect restored servo control option selections
-    andwf   srvCtrl,F       ; Clear unset non option selection flags
-    andlw   ~XTNDMASK       ; Isolate non option selection flags
-    iorwf   srvCtrl,F       ; Set non option selection flags
-
     bsf     SYNCEDIND       ; Set servo settings synchronised indicator
 
-    ; Initialise servo movement (second entry point for subroutine)
-    ;******************************************************************
-
-initialisePositions
     call    scanServoInputs
 
     ; Initialise servo movement positions
@@ -1941,7 +1921,6 @@ nextSrlRxBit
     bsf     STATUS,C        ; ... if not set then set carry flag in status
 
     ; Echo Rx bit as Tx bit
-    btfsc   STATUS,C
     bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark'
     btfss   STATUS,C
     bsf     SERTXOUT        ; Set serial TX output = RS232 'space'
@@ -1949,27 +1928,27 @@ nextSrlRxBit
 
     rrf     temp3,F         ; Rotate right RS232 receive byte through carry
     btfss   STATUS,C        ; Check if not got all serial data bits ...
-    goto    endSrlRx      ; ... otherwise look for stop bit
+    goto    endSrlRx        ; ... otherwise look for stop bit
 
 continueSrlRx
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    DelayLoop    temp1, (SRLBITTIME - 16)
+    DelayLoop    temp1, (SRLBITTIME - 15)
     goto    nextSrlRxBit
 
 endSrlRx
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    DelayLoop    temp1, (SRLBITTIME - 16)
+    DelayLoop    temp1, (SRLBITTIME - 15)
+
+    bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark' (stop bit)
+    WriteTx
 
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
     return                  ; ... otherwise abort
 
     btfss   SERRXIN         ; Test for stop bit on serial input ...
     bsf     RXDATAIND       ; ... if found set data byte received indicator
-
-    bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark' (stop bit)
-    WriteTx
 
     return
 
@@ -1992,17 +1971,15 @@ dataSrlTx
     DelayLoop    temp1, (SRLBITTIME - 4)
 
 nextSrlTxBit
+    bsf     SERTXOUT        ; Set serial TX output = RS232 'space'
     rrf     temp3,F         ; Rotate right RS232 transmit byte through carry
-
     btfsc   STATUS,C
     bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark'
-    btfss   STATUS,C
-    bsf     SERTXOUT        ; Set serial TX output = RS232 'space'
     WriteTx
 
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between TX writes
-    DelayLoop    temp1, (SRLBITTIME - 13)
+    DelayLoop    temp1, (SRLBITTIME - 12)
 
     rrf     temp2,F         ; Rotate right RS232 transmit count through carry
     btfsc   STATUS,C        ; Check if sent all serial data bits ...
