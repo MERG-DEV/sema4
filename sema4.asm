@@ -130,6 +130,17 @@
 ;       directly to port in order to avoid latching noise on pin as   *
 ;       output value. Sync to null now uses standard serial data Rx.  *
 ;                                                                     *
+;    11 Aug 2013 - Chris White:                                       *
+;       Fixed bug, reading switch inputs at initialisation before     *
+;       weak pullups enabled.                                         *
+;       Drive shutoff selection input read once at initialisation     *
+;       then stored in sysFlags.                                      *
+;       Serial TX also now written through output cache.              *
+;       Adjusted Rx timing delays.                                    *
+;       Tweaked out a few instruction bytes here and there.           *
+;       Drive shutdown leaves control outputs high.                   *
+;       Clear all general purpose registers on initialisation.        *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
@@ -199,15 +210,16 @@ PORTCDIR    EQU    B'00100000' ; All bits outputs except 5 (Drive Shutoff)
 #define  SRV4INP   INPORT,5
 
 ; Servo control bit definitions (active high)
-#define  SRV1IN    srvCtrl,0
-#define  SRV2IN    srvCtrl,1
-#define  SRV3IN    srvCtrl,4
-#define  SRV4IN    srvCtrl,5
+#define  SRV1ON    srvCtrl,0
+#define  SRV2ON    srvCtrl,1
+#define  SRV3ON    srvCtrl,4
+#define  SRV4ON    srvCtrl,5
 
 #define INPMASK    B'00110011' ; Mask to isolate servo control input bits
 
-; Drive shutoff option input port bit definition (active high)
+; Drive shutoff option input and indicator bit definition (active high)
 #define  DRVOFFINP PORTC,5
+#define  DRVOFF    sysFlags,4
 
 ; Drive enabled bit definitions (active high), held in "sysFlags"
 #define  SRV1EN    0
@@ -351,7 +363,7 @@ sysFlags                    ; System status flags (all active high)
                             ;  bit 7 - Settings and EEPROM synched indicator
                             ;  bit 6 - New Rx data received indicator
                             ;  bit 5 - Main program loop enabled indicator
-                            ;  bit 4 - unused
+                            ;  bit 4 - Drive shutoff selected indicator
                             ;  bit 3 - servo 4 drive enabled
                             ;  bit 2 - servo 3 drive enabled
                             ;  bit 1 - servo 2 drive enabled
@@ -644,7 +656,7 @@ checkTimer
     goto    state1or0
 
 state3or2
-    btfss   srvState,0      ; Skip if state 3 - load  timer, go to state 2 ...
+    btfss   srvState,0      ; Skip if state 3 - load timer, go to state 2 ...
     goto    runTimer        ; ... else state 2 - run shutoff timer
 
 loadTimer
@@ -659,7 +671,7 @@ runTimer
     btfss   srvState,0      ; Skip if state 1 - disable drive if selected ...
     goto    loadTimer       ; ... else state 2 - reload timer, go to state 1
 
-    btfsc   DRVOFFINP       ; Skip if drive shutoff not selected ...
+    btfsc   DRVOFF          ; Skip if drive shutoff not selected ...
     bcf     sysFlags,SRVEN  ; ... else disable servo drive
 
     decf    srvState,F      ; Advance to state 0 - sequence complete
@@ -1013,7 +1025,15 @@ initialise
     movwf   portCval
     movwf   OUTPORT
 
+    ; Turn comparator off
+    movlw   B'00000111'
+    movwf   CMCON
+
     BANKSEL REGBANK1        ; Ensure register page 1 is selected
+
+    ; Set internal oscillator calibration
+    call    GETOSCCAL
+    movwf   OSCCAL
 
     ; Configure output port
     movlw   PORTCDIR
@@ -1024,30 +1044,23 @@ initialise
     movwf   TRISA
     movlw   PORTAPU
     movwf   WPUA
-
-    ; Set internal oscillator calibration
-    call    GETOSCCAL
-    movwf   OSCCAL
+    bcf     OPTION_REG,NOT_RAPU
 
     BANKSEL REGBANK0        ; Ensure register page 0 is selected
 
-    ; Turn comparator off
-    movlw   B'00000111'
-    movwf   CMCON
-
-    clrf    INPORT
-
-    ; Initialise states and settings
+    ; Initialise RAM to zero
     ;******************************************************************
 
-    clrf    cycleState      ; Initialise cycle state
-    movlw   DRVONMASK       ; Ensure all drive outputs enabled ...
-    iorwf   sysFlags,F      ; ... and other system flags clear
+    movlw   0x5F            ; Address of end of RAM
+    movwf   0x20            ; Ensure first byte of RAM is non zero
+    movwf   FSR             ; Point indirect register to end of RAM
 
-    ; Delay an arbitray length of time to allow things to settle
-    DelayLoop    temp1, 0xFF
-
-    call    loadAllSettings ; Load all settings from EEPROM
+clearRAM
+    clrf    INDF            ; Clear byte of RAM addressed by FSR
+    decf    FSR,F           ; Decrement FSR to next byte of RAM
+    movf    0x20,F          ; Test first byte of RAM
+    btfss   STATUS,Z        ; Skip if byte of RAM now zero ...
+    goto    clearRAM        ; ... else continue to clear RAM
 
     ; Output banner message
     ;******************************************************************
@@ -1064,6 +1077,14 @@ initialise
     call    dataSrlTx
     movlw   'f'
     call    dataSrlTx
+
+    ; Initialise settings
+    ;******************************************************************
+
+    call    loadAllSettings ; Load all settings from EEPROM
+
+    btfsc   DRVOFFINP       ; Skip if Drive shutoff option input off ...
+    bsf     DRVOFF          ; ... else set Drive shutoff option indicator
 
     ; Set interrupt intervals for output cycles and pulse timing
     ;******************************************************************
@@ -1121,14 +1142,9 @@ main
 
     movf    freezeTime,F    ; Test position setting mode timeout
     btfss   STATUS,Z        ; Skip if timeout not running ...
-    goto    skipInputs      ; ... else skip input read
-
+    decf    freezeTime,F    ; ... else decrement position setting mode timeout
+    btfsc   STATUS,Z        ; Skip if timeout running ...
     call    scanServoInputs ; ... else read inputs
-
-    incf    freezeTime,F    ; Compensate for following timeout decrement ...
-
-skipInputs
-    decf    freezeTime,F    ; Decrement position setting mode timeout
 
     ; Check for reception of serial data
     ;******************************************************************
@@ -1324,7 +1340,7 @@ srv1SetOff3Position
 
 received1OffPosition
     movwf   srv1NowH        ; Set current position as received setting value
-    bcf     SRV1IN          ; Set servo input off
+    bcf     SRV1ON          ; Set servo input off
     movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
     goto    received1Position
 
@@ -1355,7 +1371,7 @@ srv1SetOn3Position
 
 received1OnPosition
     movwf   srv1NowH        ; Set current position as received setting value
-    bsf     SRV1IN          ; Set servo input on
+    bsf     SRV1ON          ; Set servo input on
     movlw   SRVONEND        ; Initial movement state is On drive shutdown
 received1Position
     movwf   srv1State       ; Set movement state
@@ -1410,7 +1426,7 @@ srv2SetOff3Position
 
 received2OffPosition
     movwf   srv2NowH        ; Set current position as received setting value
-    bcf     SRV2IN          ; Set servo input off
+    bcf     SRV2ON          ; Set servo input off
     movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
     goto    received2Position
 
@@ -1441,7 +1457,7 @@ srv2SetOn3Position
 
 received2OnPosition
     movwf   srv2NowH        ; Set current position as received setting value
-    bsf     SRV2IN          ; Set servo input on
+    bsf     SRV2ON          ; Set servo input on
     movlw   SRVONEND        ; Initial movement state is On drive shutdown
 received2Position
     movwf   srv2State       ; Set movement state
@@ -1496,7 +1512,7 @@ srv3SetOff3Position
 
 received3OffPosition
     movwf   srv3NowH        ; Set current position as received setting value
-    bcf     SRV3IN          ; Set servo input off
+    bcf     SRV3ON          ; Set servo input off
     movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
     goto    received3Position
 
@@ -1527,7 +1543,7 @@ srv3SetOn3Position
 
 received3OnPosition
     movwf   srv3NowH        ; Set current position as received setting value
-    bsf     SRV3IN          ; Set servo input on
+    bsf     SRV3ON          ; Set servo input on
     movlw   SRVONEND        ; Initial movement state is On drive shutdown
 received3Position
     movwf   srv3State       ; Set movement state
@@ -1582,7 +1598,7 @@ srv4SetOff3Position
 
 received4OffPosition
     movwf   srv4NowH        ; Set current position as received setting value
-    bcf     SRV4IN          ; Stt servo input off
+    bcf     SRV4ON          ; Stt servo input off
     movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
     goto    received4Position
 
@@ -1613,7 +1629,7 @@ srv4SetOn3Position
 
 received4OnPosition
     movwf   srv4NowH        ; Set current position as received setting value
-    bsf     SRV4IN          ; Set servo input on
+    bsf     SRV4ON          ; Set servo input on
     movlw   SRVONEND        ; Initial movement state is On drive shutdown
 received4Position
     movwf   srv4State       ; Set movement state
@@ -1816,28 +1832,28 @@ loadSetting
 
     ; Servo 1
     movf    srv1Off,W       ; Set current position as Off setting
-    btfsc   SRV1IN          ; Skip if input is off ...
+    btfsc   SRV1ON          ; Skip if input is off ...
     movf    srv1On,W        ; ... else set current position as On setting
     movwf   srv1NowH
     clrf    srv1NowL
 
     ; Servo 2
     movf    srv2Off,W       ; Set current position as Off setting
-    btfsc   SRV2IN          ; Skip if input is off ...
+    btfsc   SRV2ON          ; Skip if input is off ...
     movf    srv2On,W        ; ... else set current position as On setting
     movwf   srv2NowH
     clrf    srv2NowL
 
     ; Servo 3
     movf    srv3Off,W       ; Set current position as Off setting
-    btfsc   SRV3IN          ; Skip if input is off ...
+    btfsc   SRV3ON          ; Skip if input is off ...
     movf    srv3On,W        ; ... else set current position as On setting
     movwf   srv3NowH
     clrf    srv3NowL
 
     ; Servo 4
     movf    srv4Off,W       ; Set current position as Off setting
-    btfsc   SRV4IN          ; Skip if input is off ...
+    btfsc   SRV4ON          ; Skip if input is off ...
     movf    srv4On,W        ; ... else set current position as On setting
     movwf   srv4NowH
     clrf    srv4NowL
@@ -1851,13 +1867,13 @@ loadSetting
     movwf   srv3State
     movwf   srv4State
 
-    btfsc   SRV1IN                  ; Skip if input is off ...
+    btfsc   SRV1ON                  ; Skip if input is off ...
     bsf     srv1State,SRVONSTBIT    ; ... else change state to On shutdown
-    btfsc   SRV2IN                  ; Skip if input is off ...
+    btfsc   SRV2ON                  ; Skip if input is off ...
     bsf     srv2State,SRVONSTBIT    ; ... else change state to On shutdown
-    btfsc   SRV3IN                  ; Skip if input is off ...
+    btfsc   SRV3ON                  ; Skip if input is off ...
     bsf     srv3State,SRVONSTBIT    ; ... else change state to On shutdown
-    btfsc   SRV4IN                  ; Skip if input is off ...
+    btfsc   SRV4ON                  ; Skip if input is off ...
     bsf     srv4State,SRVONSTBIT    ; ... else change state to On shutdown
 
     movlw   DRVONMASK       ; Ensure all drive outputs are enabled
@@ -2040,7 +2056,7 @@ getServoTarget
 ;**********************************************************************
 updateAllServos
 
-    btfsc   SRV1IN          ; Skip if input off ...
+    btfsc   SRV1ON          ; Skip if input off ...
     goto    updateSrv1On    ; ... else perform servo On update
 
 updateSrv1Off
@@ -2058,7 +2074,7 @@ ServoUpdate1
     ServoUpdate    srv1State, srv1Off, srv1NowL, SRV1EN
 
 updateSrv2
-    btfsc   SRV2IN          ; Skip if input off ...
+    btfsc   SRV2ON          ; Skip if input off ...
     goto    updateSrv2On    ; ... else perform servo On update
 
 updateSrv2Off
@@ -2076,7 +2092,7 @@ ServoUpdate2
     ServoUpdate    srv2State, srv2Off, srv2NowL, SRV2EN
 
 updateSrv3
-    btfsc   SRV3IN          ; Skip if input off ...
+    btfsc   SRV3ON          ; Skip if input off ...
     goto    updateSrv3On    ; ... else perform servo On update
 
 updateSrv3Off
@@ -2094,7 +2110,7 @@ ServoUpdate3
     ServoUpdate    srv3State, srv3Off, srv3NowL, SRV3EN
 
 updateSrv4
-    btfsc   SRV4IN          ; Skip if input off ...
+    btfsc   SRV4ON          ; Skip if input off ...
     goto    updateSrv4On    ; ... else perform servo On update
 
 updateSrv4Off
