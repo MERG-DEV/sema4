@@ -146,6 +146,7 @@
 ;       initialise positions to match end of last movement based on   *
 ;       saved inputs then if changed begin controlled movement. If    *
 ;       unchanged remain at current position.                         *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
@@ -191,6 +192,9 @@ REGBANK1    EQU    0x80        ; Value used to select register bank 1
 GETOSCCAL   EQU    0x3FF       ; Address of oscillator calibration value
 
 RAMSTART    EQU    0x0020      ; General Purpose register data area
+RAMEND      EQU    RAMSTART + 0x3F
+
+#define ENDSETTINGS srv4On3
 
 EESTART     EQU    0x2100      ; EEPROM data area
 
@@ -222,9 +226,8 @@ PORTCDIR    EQU    B'00100000' ; All bits outputs except 5 (Drive Shutoff)
 
 #define INPMASK    B'00110011' ; Mask to isolate servo control input bits
 
-; Drive shutoff option input and indicator bit definition (active high)
+; Drive shutoff option input bit definition (active high)
 #define  DRVOFFINP PORTC,5
-#define  DRVOFF    sysFlags,4
 
 ; Drive enabled bit definitions (active high), held in "sysFlags"
 #define  SRV1EN    0
@@ -315,6 +318,7 @@ MAXRATE     EQU    MAXPOINT ; Value for maximum rate
 #define  SYNCEDIND    sysFlags,7    ; Settings and EEPROM in synch indicator
 #define  RXDATAIND    sysFlags,6    ; New Rx data received indicator
 #define  RUNMAIN      sysFlags,5    ; Main program loop enabled indicator
+#define  DRVOFF       sysFlags,4    ; Drive shutoff option indicator
 
 ; Received data test masks
 ;**********************************************************************
@@ -387,58 +391,58 @@ srvCtrl                     ; Servo control flags (all active high)
 ; Servo 1 position and rate settings
 ;**********************************************************************
 
+srv1OffRate                 ; Off rate
 srv1Off                     ; Off position
 srv1Off1                    ; Off position first bounce
 srv1Off2                    ; Off position second bounce
 srv1Off3                    ; Off position third bounce
+srv1OnRate                  ; On rate
 srv1On                      ; On position
 srv1On1                     ; On position first bounce
 srv1On2                     ; On position second bounce
 srv1On3                     ; On position third bounce
-srv1OffRate                 ; Off rate
-srv1OnRate                  ; On rate
 
 ; Servo 2 position and rate settings
 ;**********************************************************************
 
+srv2OffRate                 ; Off rate
 srv2Off                     ; Off position
 srv2Off1                    ; Off position first bounce
 srv2Off2                    ; Off position second bounce
 srv2Off3                    ; Off position third bounce
+srv2OnRate                  ; On rate
 srv2On                      ; On position
 srv2On1                     ; On position first bounce
 srv2On2                     ; On position second bounce
 srv2On3                     ; On position third bounce
-srv2OffRate                 ; Off rate
-srv2OnRate                  ; On rate
 
 ; Servo 3 position and rate settings
 ;**********************************************************************
 
+srv3OffRate                 ; Off rate
 srv3Off                     ; Off position
 srv3Off1                    ; Off position first bounce
 srv3Off2                    ; Off position second bounce
 srv3Off3                    ; Off position third bounce
+srv3OnRate                  ; On rate
 srv3On                      ; On position
 srv3On1                     ; On position first bounce
 srv3On2                     ; On position second bounce
 srv3On3                     ; On position third bounce
-srv3OffRate                 ; Off rate
-srv3OnRate                  ; On rate
 
 ; Servo 4 position and rate settings
 ;**********************************************************************
 
+srv4OffRate                 ; Off rate
 srv4Off                     ; Off position
 srv4Off1                    ; Off position first bounce
 srv4Off2                    ; Off position second bounce
 srv4Off3                    ; Off position third bounce
+srv4OnRate                  ; On rate
 srv4On                      ; On position
 srv4On1                     ; On position first bounce
 srv4On2                     ; On position second bounce
 srv4On3                     ; On position third bounce
-srv4OffRate                 ; Off rate
-srv4OnRate                  ; On rate
 
 ; Servo current positions
 ;**********************************************************************
@@ -491,58 +495,58 @@ eeDataStart
 ; Servo 1 position and rate settings
 ;**********************************************************************
 
+    DE      16              ; Off rate
     DE      (MIDPOINT - 20) ; Off position
     DE      (MIDPOINT -  5) ; Off position first bounce
     DE      (MIDPOINT - 10) ; Off position second bounce
     DE      (MIDPOINT - 15) ; Off position third bounce
+    DE      16              ; On rate
     DE      MIDPOINT        ; On position
     DE      (MIDPOINT - 15) ; On position first bounce
     DE      (MIDPOINT - 10) ; On position second bounce
     DE      (MIDPOINT -  5) ; On position third bounce
-    DE      16
-    DE      16
 
 ; Servo 2 position and rate settings
 ;**********************************************************************
 
+    DE      16              ; Off rate
     DE      (MIDPOINT - 20) ; Off position
     DE      (MIDPOINT -  5) ; Off position first bounce
     DE      (MIDPOINT - 10) ; Off position second bounce
     DE      (MIDPOINT - 15) ; Off position third bounce
+    DE      16              ; On rate
     DE      MIDPOINT        ; On position
     DE      (MIDPOINT - 15) ; On position first bounce
     DE      (MIDPOINT - 10) ; On position second bounce
     DE      (MIDPOINT -  5) ; On position third bounce
-    DE      16
-    DE      16
 
 ; Servo 3 position and rate settings
 ;**********************************************************************
 
+    DE      16              ; Off rate
     DE      (MIDPOINT - 20) ; Off position
     DE      (MIDPOINT -  5) ; Off position first bounce
     DE      (MIDPOINT - 10) ; Off position second bounce
     DE      (MIDPOINT - 15) ; Off position third bounce
+    DE      16              ; On rate
     DE      MIDPOINT        ; On position
     DE      (MIDPOINT - 15) ; On position first bounce
     DE      (MIDPOINT - 10) ; On position second bounce
     DE      (MIDPOINT -  5) ; On position third bounce
-    DE      16
-    DE      16
 
 ; Servo 4 position and rate settings
 ;**********************************************************************
 
+    DE      16              ; Off rate
     DE      (MIDPOINT - 20) ; Off position
     DE      (MIDPOINT -  5) ; Off position first bounce
     DE      (MIDPOINT - 10) ; Off position second bounce
     DE      (MIDPOINT - 15) ; Off position third bounce
+    DE      16              ; On rate
     DE      MIDPOINT        ; On position
     DE      (MIDPOINT - 15) ; On position first bounce
     DE      (MIDPOINT - 10) ; On position second bounce
     DE      (MIDPOINT -  5) ; On position third bounce
-    DE      16
-    DE      16
 
 ; Number of settings to load/save from/to EEPROM
 NUMSETTINGS EQU ($ - eeDataStart)
@@ -645,7 +649,7 @@ ServoUpdate  macro    srvState, srvSettings, srvNowL, SRVEN
     movlw   srvNowL         ; Load servo current position low byte address ...
     movwf   FSR             ; ... into indirect addressing register
 
-    movf    (srvNowL + 1),W ; W servo current position high byte
+    movf    (srvNowL + 1),W ; Load servo current position high byte into W
 
     call    updateServo     ; Update servo current position
 
@@ -1007,14 +1011,14 @@ getServoSettingOffset
     addwf   PCL,F
 
 settingOffsetTable
-    retlw   (srv1Off  - srv1Off) ; State  3 -  0, timeout drive shutoff
-    retlw   (srv1Off  - srv1Off) ; State  7 -  4, move back to end position
-    retlw   (srv1Off3 - srv1Off) ; State 11 -  8, move to 3rd bounce
-    retlw   (srv1Off  - srv1Off) ; State 15 - 12, move back to end position
-    retlw   (srv1Off2 - srv1Off) ; State 19 - 16, move to 2nd bounce
-    retlw   (srv1Off  - srv1Off) ; State 23 - 20, move back to end position
-    retlw   (srv1Off1 - srv1Off) ; State 27 - 24, move to 1st bounce
-    retlw   (srv1Off  - srv1Off) ; State 31 - 28, move to end position
+    retlw   (srv1Off  - srv1OffRate) ; State  3 -  0, timeout drive shutoff
+    retlw   (srv1Off  - srv1OffRate) ; State  7 -  4, move back to end position
+    retlw   (srv1Off3 - srv1OffRate) ; State 11 -  8, move to 3rd bounce
+    retlw   (srv1Off  - srv1OffRate) ; State 15 - 12, move back to end position
+    retlw   (srv1Off2 - srv1OffRate) ; State 19 - 16, move to 2nd bounce
+    retlw   (srv1Off  - srv1OffRate) ; State 23 - 20, move back to end position
+    retlw   (srv1Off1 - srv1OffRate) ; State 27 - 24, move to 1st bounce
+    retlw   (srv1Off  - srv1OffRate) ; State 31 - 28, move to end position
 
 #if (high settingOffsetTable) != (high $)
     error "Servo setting offset lookup table spans 8 bit boundary"
@@ -1056,14 +1060,14 @@ initialise
     ; Initialise RAM to zero
     ;******************************************************************
 
-    movlw   0x5F            ; Address of end of RAM
-    movwf   0x20            ; Ensure first byte of RAM is non zero
+    movlw   RAMEND          ; Address of end of RAM
+    movwf   RAMSTART        ; Ensure first byte of RAM is non zero
     movwf   FSR             ; Point indirect register to end of RAM
 
 clearRAM
     clrf    INDF            ; Clear byte of RAM addressed by FSR
     decf    FSR,F           ; Decrement FSR to next byte of RAM
-    movf    0x20,F          ; Test first byte of RAM
+    movf    RAMSTART,F      ; Test first byte of RAM
     btfss   STATUS,Z        ; Skip if byte of RAM now zero ...
     goto    clearRAM        ; ... else continue to clear RAM
 
@@ -1721,7 +1725,7 @@ testForStore
     movlw   NUMSETTINGS
     movwf   temp1           ; Set index of settings to write to EEPROM
 
-    movlw   srv4OnRate      ; Load end address of servo settings ...
+    movlw   ENDSETTINGS     ; Load end address of servo settings ...
     movwf   FSR             ; ... into indirect addressing register
 
 storeSetting
@@ -1815,7 +1819,7 @@ loadAllSettings
     movlw   NUMSETTINGS
     movwf   temp1           ; Set index of settings to be read from EEPROM
 
-    movlw   srv4OnRate      ; Load end address of servo settings ...
+    movlw   ENDSETTINGS     ; Load end address of servo settings ...
     movwf   FSR             ; ... into indirect addressing register
 
 loadSetting
@@ -2083,7 +2087,7 @@ updateSrv1On
     movf    srv1OnRate,W
 
 ServoUpdate1
-    ServoUpdate    srv1State, srv1Off, srv1NowL, SRV1EN
+    ServoUpdate    srv1State, srv1OffRate, srv1NowL, SRV1EN
 
 updateSrv2
     btfsc   SRV2ON          ; Skip if input off ...
@@ -2101,7 +2105,7 @@ updateSrv2On
     movf    srv2OnRate,W
 
 ServoUpdate2
-    ServoUpdate    srv2State, srv2Off, srv2NowL, SRV2EN
+    ServoUpdate    srv2State, srv2OffRate, srv2NowL, SRV2EN
 
 updateSrv3
     btfsc   SRV3ON          ; Skip if input off ...
@@ -2119,7 +2123,7 @@ updateSrv3On
     movf    srv3OnRate,W
 
 ServoUpdate3
-    ServoUpdate    srv3State, srv3Off, srv3NowL, SRV3EN
+    ServoUpdate    srv3State, srv3OffRate, srv3NowL, SRV3EN
 
 updateSrv4
     btfsc   SRV4ON          ; Skip if input off ...
@@ -2137,7 +2141,7 @@ updateSrv4On
     movf    srv4OnRate,W
 
 ServoUpdate4
-    ServoUpdate    srv4State, srv4Off, srv4NowL, SRV4EN
+    ServoUpdate    srv4State, srv4OffRate, srv4NowL, SRV4EN
     return
 
 
@@ -2145,7 +2149,7 @@ ServoUpdate4
 ; Servo current position update subroutine                            *
 ;     Target position in temp1                                        *
 ;     Rate in temp2                                                   *
-;     Current high byte in W                                          *
+;     Current position high byte in W                                 *
 ;     Current position accessed via FSR (Low byte, High byte)         *
 ;                                                                     *
 ;     Return STATUS,Z set when target positions reached               *
