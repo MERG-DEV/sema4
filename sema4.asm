@@ -141,6 +141,11 @@
 ;       Drive shutdown leaves control outputs high.                   *
 ;       Clear all general purpose registers on initialisation.        *
 ;                                                                     *
+;    12 Aug 2013 - Chris White:                                       *
+;       Switch inputs stored to EEProm on change. On startup          *
+;       initialise positions to match end of last movement based on   *
+;       saved inputs then if changed begin controlled movement. If    *
+;       unchanged remain at current position.                         *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
@@ -478,7 +483,7 @@ portCval
 
 eeDataStart
 
-; Servo extended travel selections
+; Servo extended travel selections and last switch input values
 ;**********************************************************************
 
     DE      0
@@ -1825,8 +1830,6 @@ loadSetting
 
     bsf     SYNCEDIND       ; Set servo settings synchronised indicator
 
-    call    scanServoInputs
-
     ; Initialise servo movement positions
     ;******************************************************************
 
@@ -1889,12 +1892,21 @@ loadSetting
 ;**********************************************************************
 scanServoInputs
     comf    INPORT,W        ; Read, inverted, physical input port
+    xorwf   srvCtrl,W       ; Exclusive or current and previous value
+    andlw   INPMASK         ; Isolate control input bits read from port
+
+    btfsc   STATUS,Z        ; Skip if inputs have changed ...
+    return                  ; ... else do nothing
+
+    comf    INPORT,W        ; Read, inverted, physical input port
     iorlw   ~INPMASK        ; Protect control bits other than inputs
     andwf   srvCtrl,F       ; Clear inactive control input bits
     andlw   INPMASK         ; Isolate control input bits read from port
     iorwf   srvCtrl,F       ; Set active control input bits
 
-    return
+    movwf   temp2           ; Save new input values ...
+    clrw                    ; ... to ...
+    goto    writeEEPROM     ; EEPROM
 
 
 ;**********************************************************************
