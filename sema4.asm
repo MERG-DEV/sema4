@@ -1092,6 +1092,9 @@ clearRAM
 
     call    loadAllSettings ; Load all settings from EEPROM
 
+    movlw   TIMEFREEZE      ; Set setting mode timeout (ignore physical inputs)
+    movwf   freezeTime
+
     btfsc   DRVOFFINP       ; Skip if Drive shutoff option input off ...
     bsf     DRVOFF          ; ... else set Drive shutoff option indicator
 
