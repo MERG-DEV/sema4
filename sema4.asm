@@ -1,4 +1,4 @@
-    title    "$Id$"
+   title    "$Id$"
     list     p=16F630
     radix    dec
 
@@ -147,6 +147,10 @@
 ;       saved inputs then if changed begin controlled movement. If    *
 ;       unchanged remain at current position.                         *
 ;                                                                     *
+;    14 Aug 2013 - Chris White:                                       *
+;       Cycle time increased to 21 mSec to ensure time for at least   *
+;       two sequences of five bytes between servo pulses.             *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
@@ -267,13 +271,13 @@ SRLBITTIME  EQU    104         ; Delay count for 1 serial bit
 RXSTARTTIME EQU     52         ; Delay count for half a serial bit
 
 TIMEFREEZE  EQU    100         ; Number of cycles for setting mode timeout
-TIMEDRIVE   EQU    30          ; Number of cycles till drive shutoff (1.2 Sec)
+TIMEDRIVE   EQU    30          ; Number of cycles till drive shutoff
                                ; N.B. Must be less than 32 as timer is also
                                ; low byte of current position of which upper
                                ; three bits are used for pulse duration timing.
 
-; Interrupt interval for servo pulse cycle start, 19.968mSec (156 @ 7,812.5Hz)
-CYCLEINT    EQU    (0xFF - 156)
+; Interrupt interval for servo pulse cycle start, 21.121mSec (165 @ 7,812.5Hz)
+CYCLEINT    EQU    (0xFF - 165)
 
 ; Interrupt interval for start portion of servo pulse , 1mSec (250 @ 250KHz)
 ; Value will be scaled at use as clock is actually 1MHz rather than 250KHz
@@ -579,20 +583,14 @@ WriteTx  macro
 ;**********************************************************************
 ; Macro: Delay loop                                                   *
 ;**********************************************************************
-DelayLoop  macro    delayCounter, delayValue
+Delay      macro    delayValue
 
-           local    loopDelay
-
-#if (4 < delayValue)
-    movlw  ((delayValue - 2) / 3)
+#if (10 < delayValue)
+    movlw  ((delayValue - 6) / 5)
 #else
     movlw  1
 #endif
-    movwf  delayCounter
-
-loopDelay
-    decfsz delayCounter,F
-    goto   loopDelay
+    call    delayLoop
 
     endm
 
@@ -1765,6 +1763,20 @@ testForReboot
 
 
 ;**********************************************************************
+; Delay loop subroutine                                               *
+;     Loop count in W                                                 *
+;**********************************************************************
+delayLoop
+    movwf   temp1           ; Load delay loop count into temp1
+
+loopDelay
+    decfsz  temp1,F         ; Continue until temp1 reaches zero
+    btfss   RUNMAIN         ; Skip if main program loop enabled ...
+    return                  ; ... otherwise abort
+    goto    loopDelay       ; Loop if main program loop enabled
+
+
+;**********************************************************************
 ; Write to EEPROM subroutine                                          *
 ;     Address in W                                                    *
 ;     Value in temp2                                                  *
@@ -1935,7 +1947,7 @@ loopSrlRx
     goto    loopSrlRx       ; ... else loop seeking possible serial start bit
 
     ; Delay half a serial bit time in order to sample near middle of bit
-    DelayLoop    temp1, RXSTARTTIME
+    Delay        RXSTARTTIME
 
     bsf     SERTXOUT        ; Set serial TX output = RS232 'space' (start bit)
     WriteTx
@@ -1945,7 +1957,7 @@ loopSrlRx
 
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles since start bit detected
-    DelayLoop    temp1, (SRLBITTIME - 9)
+    Delay        (SRLBITTIME - 9)
 
 nextSrlRxBit
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
@@ -1968,13 +1980,13 @@ nextSrlRxBit
 continueSrlRx
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    DelayLoop    temp1, (SRLBITTIME - 15)
+    Delay        (SRLBITTIME - 15)
     goto    nextSrlRxBit
 
 endSrlRx
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    DelayLoop    temp1, (SRLBITTIME - 15)
+    Delay        (SRLBITTIME - 15)
 
     bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark' (stop bit)
     WriteTx
@@ -2003,7 +2015,7 @@ dataSrlTx
 
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between TX writes
-    DelayLoop    temp1, (SRLBITTIME - 4)
+    Delay        (SRLBITTIME - 4)
 
 nextSrlTxBit
     bsf     SERTXOUT        ; Set serial TX output = RS232 'space'
@@ -2014,7 +2026,7 @@ nextSrlTxBit
 
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between TX writes
-    DelayLoop    temp1, (SRLBITTIME - 12)
+    Delay        (SRLBITTIME - 12)
 
     rrf     temp2,F         ; Rotate right RS232 transmit count through carry
     btfsc   STATUS,C        ; Check if sent all serial data bits ...
@@ -2025,7 +2037,7 @@ endSrlTx
     WriteTx
 
     ; Delay two serial bit times
-    DelayLoop    temp1, (SRLBITTIME * 2)
+    Delay        (SRLBITTIME * 2)
 
     return
 
