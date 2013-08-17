@@ -156,6 +156,7 @@
 ;       servos.                                                       *
 ;       Defined subroutine to sync to Rx of null to improve sync to   *
 ;       start of a command sequence.                                  *
+;       Inverted sense of drive enable flags to be drive disable.     *
 ;                                                                     *
 ;**********************************************************************
 ;                                                                     *
@@ -228,7 +229,7 @@ PORTCDIR    EQU    B'00100000' ; All bits outputs except 5 (Drive Shutoff)
 #define  SRV3INP   INPORT,4
 #define  SRV4INP   INPORT,5
 
-; Servo control bit definitions (active high)
+; Servo control bit definitions (active high), srvCtrl
 #define  SRV1ON    srvCtrl,0
 #define  SRV2ON    srvCtrl,1
 #define  SRV3ON    srvCtrl,4
@@ -239,13 +240,11 @@ PORTCDIR    EQU    B'00100000' ; All bits outputs except 5 (Drive Shutoff)
 ; Drive shutoff option input bit definition (active high)
 #define  DRVOFFINP PORTC,5
 
-; Drive enabled bit definitions (active high), held in "sysFlags"
-#define  SRV1EN    0
-#define  SRV2EN    1
-#define  SRV3EN    2
-#define  SRV4EN    3
-
-#define  DRVONMASK B'00001111' ; Mask to isolate drive enabled bits
+; Drive disabled bit definitions (active high), held in "sysFlags"
+#define  SRV1DIS   0
+#define  SRV2DIS   1
+#define  SRV3DIS   2
+#define  SRV4DIS   3
 
 ; Servo control output port bit definitions (active high)
 #define  SRV1OUT   portCval,0
@@ -255,7 +254,7 @@ PORTCDIR    EQU    B'00100000' ; All bits outputs except 5 (Drive Shutoff)
 
 #define  OUTMASK   B'00001111' ; Mask to isolate drive output bits
 
-; Servo extended travel selected bit definitions
+; Servo extended travel selected bit definitions, srvCtrl
 #define  SRV1XTND  srvCtrl,2
 #define  SRV2XTND  srvCtrl,3
 #define  SRV3XTND  srvCtrl,6
@@ -310,7 +309,6 @@ SRVONEND    EQU    35          ; Initial state in "on" movement drive shutoff
 SRVMVMASK   EQU    B'00011100' ; Mask to test if movement sequence completed
 SRVONSTBIT  EQU    5           ; Bit indicates "on" or "off" movement sequence
 SRVLUMASK   EQU    B'00000111' ; Mask to isolate movement setting offset index
-SRVLUDIR    EQU    4           ; "on" or "off" movement bit after right shift
 
 ; Servo settings limit values
 ;**********************************************************************
@@ -633,7 +631,7 @@ ServoInit  macro    Off, On, ONf, ONb, NowH, NowL, State
 ; Macro: Servo current position update                                *
 ;     Rate (speed) address in W                                       *
 ;**********************************************************************
-ServoUpdate  macro  State, NowL, EN
+ServoUpdate  macro  State, NowL, DIS
 
     local   checkTimer, state3or2, loadTimer, runTimer, state1or0, endUpdate
 
@@ -647,7 +645,7 @@ ServoUpdate  macro  State, NowL, EN
     ; Set indirect addressing for servo settings and update current position
     ;******************************************************************
 
-    bsf     sysFlags,EN     ; Ensure servo drive is enabled
+    bcf     sysFlags,DIS    ; Ensure servo drive is enabled
 
     movf    State,W         ; Servo current state in W
     call    getServoTarget  ; Get servo current state target position in temp1
@@ -689,7 +687,7 @@ runTimer
     goto    loadTimer       ; ... else state 2 - reload timer, go to state 1
 
     btfsc   DRVOFF          ; Skip if drive shutoff not selected ...
-    bcf     sysFlags,EN     ; ... else disable servo drive
+    bsf     sysFlags,DIS    ; ... else disable servo drive
 
     decf    State,F         ; Advance to state 0 - sequence complete
 
@@ -705,7 +703,7 @@ endUpdate
 ;**********************************************************************
 ; Macro: Servo position update                                        *
 ;**********************************************************************
-UpdateServo  macro  ONf, ONb, OffRate, OnRate, State, NowL, EN
+UpdateServo  macro  ONf, ONb, OffRate, OnRate, State, NowL, DIS
 
     local   updateSrvOn, doUpdate
 
@@ -723,7 +721,7 @@ updateSrvOn
     movlw   OnRate
 
 doUpdate
-    ServoUpdate    State, NowL, EN
+    ServoUpdate    State, NowL, DIS
 
     endm
 
@@ -792,14 +790,9 @@ runCycle
     movlw   ~OUTMASK
     andwf   portCval,F      ; Turn off all servo control outputs
 
-    btfss   sysFlags,SRV1EN ; Skip if servo 1 drive is enabled ...
-    bsf     SRV1OUT         ; ... else turn on servo 1 control output
-    btfss   sysFlags,SRV2EN ; Skip if servo 2 drive is enabled ...
-    bsf     SRV2OUT         ; ... else turn on servo 2 control output
-    btfss   sysFlags,SRV3EN ; Skip if servo 3 drive is enabled ...
-    bsf     SRV3OUT         ; ... else turn on servo 3 control output
-    btfss   sysFlags,SRV4EN ; Skip if servo 4 drive is enabled ...
-    bsf     SRV4OUT         ; ... else turn on servo 4 control output
+    movlw   OUTMASK
+    andwf   sysFlags,W
+    iorwf   portCval,F      ; Turn on disabled servo control outputs
 
     incf    cycleState,F    ; Advance to next state
 
@@ -808,7 +801,7 @@ runCycle
     addwf   PCL,F           ; ... as index for code jump
 
 cycleStateTable
-    goto    endISR
+    goto    endCycle
     goto    srv1Pulse
     goto    srv2Pulse
     goto    srv3Pulse
@@ -819,7 +812,7 @@ cycleStateTable
     error "Interrupt cycle state jump table spans 8 bit boundary"
 #endif
 
-    goto    endISR
+    goto    endCycle
 
 
 ; Duration of servo pulses are timed using timer1. This is a 16 bit counter
@@ -920,6 +913,7 @@ nrmlPulse
 endPulse
     bsf     T1CON,TMR1ON    ; Start timer1 running
 
+endCycle
     movf    portCval,W      ; Write servo control bits ...
     movwf   OUTPORT         ; ... to output port
 
@@ -1166,7 +1160,13 @@ main
 
     bsf     RUNMAIN         ; Enable main program loop
 
-    call    updateAllServos ; Update servo current positions
+    ; Update servo current positions
+    ;******************************************************************
+
+    UpdateServo  SRV1ON, srv1OffRate, srv1OnRate, srv1State, srv1NowL, SRV1DIS
+    UpdateServo  SRV2ON, srv2OffRate, srv2OnRate, srv2State, srv2NowL, SRV2DIS
+    UpdateServo  SRV3ON, srv3OffRate, srv3OnRate, srv3State, srv3NowL, SRV3DIS
+    UpdateServo  SRV4ON, srv4OffRate, srv4OnRate, srv4State, srv4NowL, SRV4DIS
 
     ; Read servo control inputs
     ;******************************************************************
@@ -1399,7 +1399,7 @@ received1OnPosition
 received1Position
     movwf   srv1State       ; Set movement state
     clrf    srv1NowL
-    bsf     sysFlags,SRV1EN ; Enable servo drive output
+    bcf     sysFlags,SRV1DIS ; Enable servo drive output
     goto    receivedSetting
 
 srv1SetOffRate
@@ -1485,7 +1485,7 @@ received2OnPosition
 received2Position
     movwf   srv2State       ; Set movement state
     clrf    srv2NowL
-    bsf     sysFlags,SRV2EN ; Enable servo drive output
+    bcf     sysFlags,SRV2DIS ; Enable servo drive output
     goto    receivedSetting
 
 srv2SetOffRate
@@ -1571,7 +1571,7 @@ received3OnPosition
 received3Position
     movwf   srv3State       ; Set movement state
     clrf    srv3NowL
-    bsf     sysFlags,SRV3EN ; Enable servo drive output
+    bcf     sysFlags,SRV3DIS ; Enable servo drive output
     goto    receivedSetting
 
 srv3SetOffRate
@@ -1621,7 +1621,7 @@ srv4SetOff3Position
 
 received4OffPosition
     movwf   srv4NowH        ; Set current position as received setting value
-    bcf     SRV4ON          ; Stt servo input off
+    bcf     SRV4ON          ; Set servo input off
     movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
     goto    received4Position
 
@@ -1657,7 +1657,7 @@ received4OnPosition
 received4Position
     movwf   srv4State       ; Set movement state
     clrf    srv4NowL
-    bsf     sysFlags,SRV4EN ; Enable servo drive output
+    bcf     sysFlags,SRV4DIS ; Enable servo drive output
     goto    receivedSetting
 
 srv4SetOffRate
@@ -1882,9 +1882,6 @@ loadSetting
 
     ; Servo 4
     ServoInit    srv4Off, srv4On, SRV4ON, srv4NowH, srv4NowL, srv4State
-
-    movlw   DRVONMASK       ; Ensure all drive outputs are enabled
-    iorwf   sysFlags,F
 
     return
 
@@ -2132,18 +2129,6 @@ getServoTarget
     movf    INDF,W          ; Indirectly get servo setting
     movwf   temp1           ; Store servo target position in temp1
 
-    return
-
-
-;**********************************************************************
-; Servo current positions update subroutine                           *
-;**********************************************************************
-updateAllServos
-
-    UpdateServo  SRV1ON, srv1OffRate, srv1OnRate, srv1State, srv1NowL, SRV1EN
-    UpdateServo  SRV2ON, srv2OffRate, srv2OnRate, srv2State, srv2NowL, SRV2EN
-    UpdateServo  SRV3ON, srv3OffRate, srv3OnRate, srv3State, srv3NowL, SRV3EN
-    UpdateServo  SRV4ON, srv4OffRate, srv4OnRate, srv4State, srv4NowL, SRV4EN
     return
 
 
