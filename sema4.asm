@@ -151,6 +151,12 @@
 ;       Cycle time increased to 21 mSec to ensure time for at least   *
 ;       two sequences of five bytes between servo pulses.             *
 ;                                                                     *
+;    17 Aug 2013 - Chris White:                                       *
+;       Defined macros to reduce duplication of code common to all    *
+;       servos.                                                       *
+;       Defined subroutine to sync to Rx of null to improve sync to   *
+;       start of a command sequence.                                  *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
@@ -568,19 +574,6 @@ SetPCLATH  macro    codeLabel
 
 
 ;**********************************************************************
-; Macro: Write serial Tx bit on output port (4 clock cycles)          *
-;**********************************************************************
-WriteTx  macro
-
-    bcf     INTCON,GIE      ; Disable interrupts
-    movf    portCval,W
-    movwf   OUTPORT
-    bsf     INTCON,GIE      ; Enable interrupts
-
-    endm
-
-
-;**********************************************************************
 ; Macro: Delay loop                                                   *
 ;**********************************************************************
 Delay      macro    delayValue
@@ -598,11 +591,11 @@ Delay      macro    delayValue
 ;**********************************************************************
 ; Macro: Set servo On state                                           *
 ;**********************************************************************
-ServoOnState  macro     servoState
+ServoOnState  macro     State
 
-    movlw   SRVONST                 ; Get initial "on" movement state index
-    btfss   servoState,SRVONSTBIT   ; Skip if in "on" movement sequence ...
-    movwf   servoState              ; ... else start "on" movement sequence
+    movlw   SRVONST             ; Get initial "on" movement state index
+    btfss   State,SRVONSTBIT    ; Skip if in "on" movement sequence ...
+    movwf   State               ; ... else start "on" movement sequence
 
     endm
 
@@ -610,11 +603,11 @@ ServoOnState  macro     servoState
 ;**********************************************************************
 ; Macro: Set servo Off state                                          *
 ;**********************************************************************
-ServoOffState  macro    servoState
+ServoOffState  macro    State
 
-    movlw   SRVOFFST                ; Get initial "off" movement state index
-    btfsc   servoState,SRVONSTBIT   ; Skip if in "off" movement sequence ...
-    movwf   servoState              ; ... else start "off" movement sequence
+    movlw   SRVOFFST            ; Get initial "off" movement state index
+    btfsc   State,SRVONSTBIT    ; Skip if in "off" movement sequence ...
+    movwf   State               ; ... else start "off" movement sequence
 
     endm
 
@@ -673,6 +666,8 @@ ServoUpdate  macro  State, NowL, EN
 checkTimer
     ; Servo movement complete, if necessary perform drive shutoff
     ;******************************************************************
+
+    ; Use bits 0 and 1 as same behaviour regardless of movement direction
 
     btfss   State,1         ; Skip if state 3 or 2
     goto    state1or0
@@ -1161,7 +1156,7 @@ main
     ;******************************************************************
 
     bcf     SERTXOUT        ; Set serial TX output = RS232 'mark' (idle)
-    WriteTx
+    call    writeTx
 
     movf    cycleState,W    ; Test pulse output cycle state
     btfss   STATUS,Z        ; Skip if pulse output cycle not running ...
@@ -1194,17 +1189,9 @@ syncSrlRx
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
     goto    main            ; ... otherwise abort
 
-    call    dataSrlRx       ; Receive byte via serial input
-    btfss   RXDATAIND       ; Skip if received a byte ...
+    call    nullSrlRx       ; Receive null byte via serial input
+    btfss   RXDATAIND       ; Skip if received a null ...
     goto    syncSrlRx       ; ... otherwise abort
-
-    ; Data sequence starts with a null Synchronisation byte,
-    ; eight bits of high (RS232 'space')
-    ;******************************************************************
-
-    movf    temp3,F         ; Test received byte ...
-    btfss   STATUS,Z        ; ... skip if zero ...
-    goto    syncSrlRx       ; ... otherwise not receiving null, start again
 
     ; Synchronised to null byte, receive command (1 byte) and value (3 bytes)
     ;******************************************************************
@@ -1925,14 +1912,67 @@ scanServoInputs
 
 
 ;**********************************************************************
+; RS232 sync subroutine                                               *
+;     Receives null byte, sets RXDATAIND if successful                *
+;     Rx bit state echoed back as Tx bit                              *
+;**********************************************************************
+nullSrlRx
+    bcf     RXDATAIND       ; Clear data byte received indicator
+
+loopNullRx
+    btfss   RUNMAIN         ; Skip if main program loop enabled ...
+    return                  ; ... otherwise abort
+
+    btfss   SERRXIN         ; Test for possible start bit on serial input ...
+    goto    loopNullRx      ; ... else loop seeking possible serial start bit
+
+    ; Delay half a serial bit time in order to sample near middle of bit
+    Delay        RXSTARTTIME
+
+    bsf     SERTXOUT        ; Set serial TX output = RS232 'space' (start bit)
+    call    writeTx
+
+    movlw   RS232BITS
+    movwf   temp3
+
+    ; Delay one serial bit time
+    ; Adjust delay value to allow for clock cycles since start bit detected
+    Delay        (SRLBITTIME - 11)
+
+nextNullBit
+    btfss   RUNMAIN         ; Skip if main program loop enabled ...
+    return                  ; ... otherwise abort
+
+    btfss   SERRXIN         ; Test RX zero on serial input ...
+    return                  ; ... otherwise abort
+
+    ; Delay one serial bit time
+    ; Adjust delay value to allow for clock cycles between RX reads
+    Delay        (SRLBITTIME - 8)
+
+    rrf     temp3,F         ; Rotate right RS232 receive byte through carry
+    btfsc   STATUS,C        ; Check if got all serial data bits ...
+    goto    nextNullBit     ; ... otherwise look for next bit
+
+    bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark' (stop bit)
+
+    btfss   RUNMAIN         ; Skip if main program loop enabled ...
+    goto    writeTx         ; ... otherwise abort
+
+    btfss   SERRXIN         ; Test for stop bit on serial input ...
+    bsf     RXDATAIND       ; ... if found set data byte received indicator
+
+    goto    writeTx         ; Return via writeTx
+
+
+
+
+;**********************************************************************
 ; RS232 input subroutine                                              *
 ;     Receives data byte into temp3, sets RXDATAIND if successful     *
 ;     Rx bit state echoed back as Tx bit                              *
 ;**********************************************************************
 dataSrlRx
-    bcf     SERTXOUT        ; Set serial TX output = RS232 'mark' (idle)
-    WriteTx
-
     bcf     RXDATAIND       ; Clear data byte received indicator
 
 loopSrlRx
@@ -1946,14 +1986,14 @@ loopSrlRx
     Delay        RXSTARTTIME
 
     bsf     SERTXOUT        ; Set serial TX output = RS232 'space' (start bit)
-    WriteTx
+    call    writeTx
 
     movlw   RS232BITS
     movwf   temp3
 
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles since start bit detected
-    Delay        (SRLBITTIME - 9)
+    Delay        (SRLBITTIME - 11)
 
 nextSrlRxBit
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
@@ -1967,7 +2007,7 @@ nextSrlRxBit
     bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark'
     btfss   STATUS,C
     bsf     SERTXOUT        ; Set serial TX output = RS232 'space'
-    WriteTx
+    call    writeTx
 
     rrf     temp3,F         ; Rotate right RS232 receive byte through carry
     btfss   STATUS,C        ; Check if not got all serial data bits ...
@@ -1976,24 +2016,23 @@ nextSrlRxBit
 continueSrlRx
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    Delay        (SRLBITTIME - 15)
+    Delay        (SRLBITTIME - 21)
     goto    nextSrlRxBit
 
 endSrlRx
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    Delay        (SRLBITTIME - 15)
+    Delay        (SRLBITTIME - 21)
 
     bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark' (stop bit)
-    WriteTx
 
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
-    return                  ; ... otherwise abort
+    goto    writeTx         ; ... otherwise abort
 
     btfss   SERRXIN         ; Test for stop bit on serial input ...
     bsf     RXDATAIND       ; ... if found set data byte received indicator
 
-    return
+    goto    writeTx         ; Return via writeTx
 
 
 ;**********************************************************************
@@ -2007,7 +2046,7 @@ dataSrlTx
     movwf   temp2
 
     bsf     SERTXOUT        ; Set serial TX output = RS232 'space' (start bit)
-    WriteTx
+    call    writeTx
 
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between TX writes
@@ -2018,11 +2057,11 @@ nextSrlTxBit
     rrf     temp3,F         ; Rotate right RS232 transmit byte through carry
     btfsc   STATUS,C
     bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark'
-    WriteTx
+    call    writeTx
 
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between TX writes
-    Delay        (SRLBITTIME - 12)
+    Delay        (SRLBITTIME - 16)
 
     rrf     temp2,F         ; Rotate right RS232 transmit count through carry
     btfsc   STATUS,C        ; Check if sent all serial data bits ...
@@ -2030,10 +2069,23 @@ nextSrlTxBit
 
 endSrlTx
     bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark' (stop bit)
-    WriteTx
+    call    writeTx
 
     ; Delay two serial bit times
     Delay        (SRLBITTIME * 2)
+
+    return
+
+
+;**********************************************************************
+; Serial Tx bit write to output port subroutine (6 clock cycles)      *
+;**********************************************************************
+writeTx
+
+    bcf     INTCON,GIE      ; Disable interrupts
+    movf    portCval,W
+    movwf   OUTPORT
+    bsf     INTCON,GIE      ; Enable interrupts
 
     return
 
