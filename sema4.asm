@@ -585,7 +585,7 @@ WriteTx  macro
 ;**********************************************************************
 Delay      macro    delayValue
 
-#if (10 < delayValue)
+#if (1 < ((delayValue - 6) / 5))
     movlw  ((delayValue - 6) / 5)
 #else
     movlw  1
@@ -621,13 +621,13 @@ ServoOffState  macro    servoState
 
 ;**********************************************************************
 ; Macro: Servo current position update                                *
-;     Rate (speed) passed in W                                        *
+;     Rate (speed) address in W                                       *
 ;**********************************************************************
-ServoUpdate  macro    srvState, srvSettings, srvNowL, SRVEN
+ServoUpdate  macro    srvState, srvNowL, SRVEN
 
     local   checkTimer, state3or2, loadTimer, runTimer, state1or0, endUpdate
 
-    movwf   temp2           ; Store servo rate (speed) in temp2
+    movwf   FSR             ; Indirectly address servo settings for state
 
     movlw   SRVMVMASK       ; Mask non movement states bits ...
     andwf   srvState,W      ; ... from servo movement state
@@ -639,8 +639,6 @@ ServoUpdate  macro    srvState, srvSettings, srvNowL, SRVEN
 
     bsf     sysFlags,SRVEN  ; Ensure servo drive is enabled
 
-    movlw   srvSettings     ; Servo settings base address ...
-    movwf   FSR             ; ... into indirect addressing register
     movf    srvState,W      ; Servo current state in W
     call    getServoTarget  ; Get servo current state target position in temp1
 
@@ -1005,7 +1003,7 @@ getServoSettingOffset
 
     rrf     temp1,F
     rrf     temp1,W
-    andlw   SRVLUMASK
+    andlw   SRVLUMASK   ; Isolate bits 0 to 4, makes states 63 to 32 == 31 to 0
     addwf   PCL,F
 
 settingOffsetTable
@@ -2065,19 +2063,22 @@ digitSrlRx
 ;**********************************************************************
 ; Servo position setting for state lookup subroutine                  *
 ;     Servo movement state passed in W                                *
-;     Servo settings base address passed in FSR                       *
+;     Servo settings base address (rate) passed in FSR                *
 ;                                                                     *
 ;     Servo target position returned in temp1                         *
+;     Servo rate (speed) returned in temp2                            *
 ;**********************************************************************
 getServoTarget
-    movwf   temp1               ; Save servo movement state in temp1
-    call    getServoSettingOffset
-    btfsc   temp1,SRVLUDIR      ; Skip if in Off movement sequence ...
-    addlw   (srv1On - srv1Off)  ; ... else adjust offset to On settings
+    movwf   temp1           ; Save servo movement state in temp1
 
-    addwf   FSR,F               ; Add offset to servo settings base address
-    movf    INDF,W              ; Indirectly get servo setting
-    movwf   temp1               ; Store servo target position in temp1
+    movf    INDF,W          ; Store servo rate (speed) ...
+    movwf   temp2           ; ... in temp2
+
+    call    getServoSettingOffset
+
+    addwf   FSR,F           ; Add offset to servo settings base address
+    movf    INDF,W          ; Indirectly get servo setting
+    movwf   temp1           ; Store servo target position in temp1
 
     return
 
@@ -2093,16 +2094,16 @@ updateAllServos
 updateSrv1Off
     ServoOffState  srv1State
 
-    movf    srv1OffRate,W
+    movlw   srv1OffRate
     goto    ServoUpdate1
 
 updateSrv1On
     ServoOnState   srv1State
 
-    movf    srv1OnRate,W
+    movlw   srv1OnRate
 
 ServoUpdate1
-    ServoUpdate    srv1State, srv1OffRate, srv1NowL, SRV1EN
+    ServoUpdate    srv1State, srv1NowL, SRV1EN
 
 updateSrv2
     btfsc   SRV2ON          ; Skip if input off ...
@@ -2111,16 +2112,16 @@ updateSrv2
 updateSrv2Off
     ServoOffState  srv2State
 
-    movf    srv2OffRate,W
+    movlw   srv2OffRate
     goto    ServoUpdate2
 
 updateSrv2On
     ServoOnState   srv2State
 
-    movf    srv2OnRate,W
+    movlw   srv2OnRate
 
 ServoUpdate2
-    ServoUpdate    srv2State, srv2OffRate, srv2NowL, SRV2EN
+    ServoUpdate    srv2State, srv2NowL, SRV2EN
 
 updateSrv3
     btfsc   SRV3ON          ; Skip if input off ...
@@ -2129,16 +2130,16 @@ updateSrv3
 updateSrv3Off
     ServoOffState  srv3State
 
-    movf    srv3OffRate,W
+    movlw   srv3OffRate
     goto    ServoUpdate3
 
 updateSrv3On
     ServoOnState   srv3State
 
-    movf    srv3OnRate,W
+    movlw   srv3OnRate
 
 ServoUpdate3
-    ServoUpdate    srv3State, srv3OffRate, srv3NowL, SRV3EN
+    ServoUpdate    srv3State, srv3NowL, SRV3EN
 
 updateSrv4
     btfsc   SRV4ON          ; Skip if input off ...
@@ -2147,16 +2148,16 @@ updateSrv4
 updateSrv4Off
     ServoOffState  srv4State
 
-    movf    srv4OffRate,W
+    movlw   srv4OffRate
     goto    ServoUpdate4
 
 updateSrv4On
     ServoOnState   srv4State
 
-    movf    srv4OnRate,W
+    movlw   srv4OnRate
 
 ServoUpdate4
-    ServoUpdate    srv4State, srv4OffRate, srv4NowL, SRV4EN
+    ServoUpdate    srv4State, srv4NowL, SRV4EN
     return
 
 
