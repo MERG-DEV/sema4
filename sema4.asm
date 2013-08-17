@@ -578,8 +578,8 @@ SetPCLATH  macro    codeLabel
 ;**********************************************************************
 Delay      macro    delayValue
 
-#if (1 < ((delayValue - 6) / 5))
-    movlw  ((delayValue - 6) / 5)
+#if (1 < ((delayValue - 4) / 5))
+    movlw  ((delayValue - 4) / 5)
 #else
     movlw  1
 #endif
@@ -1074,22 +1074,10 @@ initialise
 
     BANKSEL REGBANK0        ; Ensure register page 0 is selected
 
-    ; Initialise RAM to zero
-    ;******************************************************************
-
-    movlw   RAMEND          ; Address of end of RAM
-    movwf   RAMSTART        ; Ensure first byte of RAM is non zero
-    movwf   FSR             ; Point indirect register to end of RAM
-
-clearRAM
-    clrf    INDF            ; Clear byte of RAM addressed by FSR
-    decf    FSR,F           ; Decrement FSR to next byte of RAM
-    movf    RAMSTART,F      ; Test first byte of RAM
-    btfss   STATUS,Z        ; Skip if byte of RAM now zero ...
-    goto    clearRAM        ; ... else continue to clear RAM
-
     ; Output banner message
     ;******************************************************************
+
+    bsf     RUNMAIN         ; Stop delay loop aborting
 
     movlw   'S'
     call    dataSrlTx
@@ -1103,6 +1091,20 @@ clearRAM
     call    dataSrlTx
     movlw   'f'
     call    dataSrlTx
+
+    ; Initialise RAM to zero
+    ;******************************************************************
+
+    movlw   RAMEND          ; Address of end of RAM
+    movwf   RAMSTART        ; Ensure first byte of RAM is non zero
+    movwf   FSR             ; Point indirect register to end of RAM
+
+clearRAM
+    clrf    INDF            ; Clear byte of RAM addressed by FSR
+    decf    FSR,F           ; Decrement FSR to next byte of RAM
+    movf    RAMSTART,F      ; Test first byte of RAM
+    btfss   STATUS,Z        ; Skip if byte of RAM now zero ...
+    goto    clearRAM        ; ... else continue to clear RAM
 
     ; Initialise settings
     ;******************************************************************
@@ -1156,7 +1158,7 @@ main
     ;******************************************************************
 
     bcf     SERTXOUT        ; Set serial TX output = RS232 'mark' (idle)
-    call    writeTx
+    call    outputTx
 
     movf    cycleState,W    ; Test pulse output cycle state
     btfss   STATUS,Z        ; Skip if pulse output cycle not running ...
@@ -1930,14 +1932,14 @@ loopNullRx
     Delay        RXSTARTTIME
 
     bsf     SERTXOUT        ; Set serial TX output = RS232 'space' (start bit)
-    call    writeTx
+    call    outputTx
 
     movlw   RS232BITS
     movwf   temp3
 
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles since start bit detected
-    Delay        (SRLBITTIME - 11)
+    Delay        (SRLBITTIME - 15)
 
 nextNullBit
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
@@ -1957,12 +1959,12 @@ nextNullBit
     bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark' (stop bit)
 
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
-    goto    writeTx         ; ... otherwise abort
+    goto    outputTx        ; ... otherwise abort
 
     btfss   SERRXIN         ; Test for stop bit on serial input ...
     bsf     RXDATAIND       ; ... if found set data byte received indicator
 
-    goto    writeTx         ; Return via writeTx
+    goto    outputTx        ; Return via writeTx
 
 
 
@@ -1986,14 +1988,14 @@ loopSrlRx
     Delay        RXSTARTTIME
 
     bsf     SERTXOUT        ; Set serial TX output = RS232 'space' (start bit)
-    call    writeTx
+    call    outputTx
 
     movlw   RS232BITS
     movwf   temp3
 
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles since start bit detected
-    Delay        (SRLBITTIME - 11)
+    Delay        (SRLBITTIME - 16)
 
 nextSrlRxBit
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
@@ -2007,7 +2009,7 @@ nextSrlRxBit
     bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark'
     btfss   STATUS,C
     bsf     SERTXOUT        ; Set serial TX output = RS232 'space'
-    call    writeTx
+    call    outputTx
 
     rrf     temp3,F         ; Rotate right RS232 receive byte through carry
     btfss   STATUS,C        ; Check if not got all serial data bits ...
@@ -2016,23 +2018,23 @@ nextSrlRxBit
 continueSrlRx
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    Delay        (SRLBITTIME - 21)
+    Delay        (SRLBITTIME - 20)
     goto    nextSrlRxBit
 
 endSrlRx
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between RX reads
-    Delay        (SRLBITTIME - 21)
+    Delay        (SRLBITTIME - 20)
 
     bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark' (stop bit)
 
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
-    goto    writeTx         ; ... otherwise abort
+    goto    outputTx        ; ... otherwise abort
 
     btfss   SERRXIN         ; Test for stop bit on serial input ...
     bsf     RXDATAIND       ; ... if found set data byte received indicator
 
-    goto    writeTx         ; Return via writeTx
+    goto    outputTx        ; Return via writeTx
 
 
 ;**********************************************************************
@@ -2046,18 +2048,18 @@ dataSrlTx
     movwf   temp2
 
     bsf     SERTXOUT        ; Set serial TX output = RS232 'space' (start bit)
-    call    writeTx
+    call    outputTx
 
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between TX writes
-    Delay        (SRLBITTIME - 4)
+    Delay        (SRLBITTIME - 13)
 
 nextSrlTxBit
     bsf     SERTXOUT        ; Set serial TX output = RS232 'space'
     rrf     temp3,F         ; Rotate right RS232 transmit byte through carry
     btfsc   STATUS,C
     bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark'
-    call    writeTx
+    call    outputTx
 
     ; Delay one serial bit time
     ; Adjust delay value to allow for clock cycles between TX writes
@@ -2069,7 +2071,7 @@ nextSrlTxBit
 
 endSrlTx
     bcf     SERTXOUT        ; Clear serial TX output = RS232 'mark' (stop bit)
-    call    writeTx
+    call    outputTx
 
     ; Delay two serial bit times
     Delay        (SRLBITTIME * 2)
@@ -2080,7 +2082,7 @@ endSrlTx
 ;**********************************************************************
 ; Serial Tx bit write to output port subroutine (6 clock cycles)      *
 ;**********************************************************************
-writeTx
+outputTx
 
     bcf     INTCON,GIE      ; Disable interrupts
     movf    portCval,W
