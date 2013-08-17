@@ -598,7 +598,7 @@ Delay      macro    delayValue
 ;**********************************************************************
 ; Macro: Set servo On state                                           *
 ;**********************************************************************
-ServoOnState  macro    servoState
+ServoOnState  macro     servoState
 
     movlw   SRVONST                 ; Get initial "on" movement state index
     btfss   servoState,SRVONSTBIT   ; Skip if in "on" movement sequence ...
@@ -620,72 +620,134 @@ ServoOffState  macro    servoState
 
 
 ;**********************************************************************
+; Macro: Initalise servo current position and sequences               *
+;**********************************************************************
+ServoInit  macro    Off, On, ONf, ONb, NowH, NowL, State
+
+    movf    Off,W           ; Set current position as Off setting
+    btfsc   ONf,ONb         ; Skip if input is off ...
+    movf    On,W            ; ... else set current position as On setting
+    movwf   NowH
+    clrf    NowL
+
+    btfsc   ONf,ONb             ; Skip if input is off ...
+    bsf     State,SRVONSTBIT    ; ... else change state to On shutdown
+
+    endm
+
+
+;**********************************************************************
 ; Macro: Servo current position update                                *
 ;     Rate (speed) address in W                                       *
 ;**********************************************************************
-ServoUpdate  macro    srvState, srvNowL, SRVEN
+ServoUpdate  macro  State, NowL, EN
 
     local   checkTimer, state3or2, loadTimer, runTimer, state1or0, endUpdate
 
     movwf   FSR             ; Indirectly address servo settings for state
 
     movlw   SRVMVMASK       ; Mask non movement states bits ...
-    andwf   srvState,W      ; ... from servo movement state
+    andwf   State,W         ; ... from servo movement state
     btfsc   STATUS,Z        ; Skip if movement not yet complete ...
     goto    checkTimer      ; ... otherwise skip movement update
 
     ; Set indirect addressing for servo settings and update current position
     ;******************************************************************
 
-    bsf     sysFlags,SRVEN  ; Ensure servo drive is enabled
+    bsf     sysFlags,EN     ; Ensure servo drive is enabled
 
-    movf    srvState,W      ; Servo current state in W
+    movf    State,W         ; Servo current state in W
     call    getServoTarget  ; Get servo current state target position in temp1
 
-    movlw   srvNowL         ; Load servo current position low byte address ...
+    movlw   NowL            ; Load servo current position low byte address ...
     movwf   FSR             ; ... into indirect addressing register
 
-    movf    (srvNowL + 1),W ; Load servo current position high byte into W
+    movf    (NowL + 1),W    ; Load servo current position high byte into W
 
     call    updateServo     ; Update servo current position
 
     btfsc   STATUS,Z        ; Check if current and target positions match ...
-    decf    srvState,F      ; ... if so advance to next movement state
+    decf    State,F         ; ... if so advance to next movement state
     goto    endUpdate
 
 checkTimer
     ; Servo movement complete, if necessary perform drive shutoff
     ;******************************************************************
 
-    btfss   srvState,1      ; Skip if state 3 or 2
+    btfss   State,1         ; Skip if state 3 or 2
     goto    state1or0
 
 state3or2
-    btfss   srvState,0      ; Skip if state 3 - load timer, go to state 2 ...
+    btfss   State,0         ; Skip if state 3 - load timer, go to state 2 ...
     goto    runTimer        ; ... else state 2 - run shutoff timer
 
 loadTimer
     movlw   TIMEDRIVE
-    movwf   srvNowL         ; Load drive shutoff timer
-    decf    srvState,F      ; Advance to next state, 2 or 1
+    movwf   NowL            ; Load drive shutoff timer
+    decf    State,F         ; Advance to next state, 2 or 1
 
 runTimer
-    decfsz  srvNowL,F       ; Decrement timer, skip if expired ...
+    decfsz  NowL,F          ; Decrement timer, skip if expired ...
     goto    endUpdate       ; ... else remain in same state
 
-    btfss   srvState,0      ; Skip if state 1 - disable drive if selected ...
+    btfss   State,0         ; Skip if state 1 - disable drive if selected ...
     goto    loadTimer       ; ... else state 2 - reload timer, go to state 1
 
     btfsc   DRVOFF          ; Skip if drive shutoff not selected ...
-    bcf     sysFlags,SRVEN  ; ... else disable servo drive
+    bcf     sysFlags,EN     ; ... else disable servo drive
 
-    decf    srvState,F      ; Advance to state 0 - sequence complete
+    decf    State,F         ; Advance to state 0 - sequence complete
 
 state1or0
-    btfsc   srvState,0      ; Skip if state 0 - sequence complete ...
+    btfsc   State,0         ; Skip if state 0 - sequence complete ...
     goto    runTimer        ; ... else state 1 - run shutoff timer
 
 endUpdate
+
+    endm
+
+
+;**********************************************************************
+; Macro: Servo position update                                        *
+;**********************************************************************
+UpdateServo  macro  ONf, ONb, OffRate, OnRate, State, NowL, EN
+
+    local   updateSrvOn, doUpdate
+
+    btfsc   ONf,ONb         ; Skip if input off ...
+    goto    updateSrvOn     ; ... else perform servo On update
+
+    ServoOffState  State
+
+    movlw   OffRate
+    goto    doUpdate
+
+updateSrvOn
+    ServoOnState   State
+
+    movlw   OnRate
+
+doUpdate
+    ServoUpdate    State, NowL, EN
+
+    endm
+
+
+;**********************************************************************
+; Macro: Interrupt set servo pulse duration                           *
+;**********************************************************************
+ServoPulse  macro  OUTf, OUTb, NowH, NowL, XTNDf, XTNDb
+
+    bsf     OUTf,OUTb       ; Turn on servo control output
+
+    movf    NowH,W          ; Get high byte of duration for position ...
+    movwf   TMR1L           ; ... and save in low byte of timer1
+
+    movf    NowL,W          ; Get low byte of duration for position
+
+    btfss   XTNDf,XTNDb     ; Skip if servo extended travel is selected
+    goto    nrmlPulse
+    goto    xtndPulse
 
     endm
 
@@ -881,52 +943,16 @@ endISR
 srv1Pulse
     bcf     RUNMAIN         ; Disable main program loop
 
-    bsf     SRV1OUT         ; Turn on servo 1 control output
-
-    movf    srv1NowH,W      ; Get high byte of duration for position ...
-    movwf   TMR1L           ; ... and save in low byte of timer1
-
-    movf    srv1NowL,W      ; Get low byte of duration for position
-
-    btfss   SRV1XTND        ; Skip if servo 1 extended travel is selected
-    goto    nrmlPulse
-    goto    xtndPulse
+    ServoPulse  SRV1OUT, srv1NowH, srv1NowL, SRV1XTND
 
 srv2Pulse
-    bsf     SRV2OUT         ; Turn on servo 2 control output
-
-    movf    srv2NowH,W      ; Get high byte of duration for position ...
-    movwf   TMR1L           ; ... and save in low byte of timer1
-
-    movf    srv2NowL,W      ; Get low byte of duration for position
-
-    btfss   SRV2XTND        ; Skip if servo 2 extended travel is selected
-    goto    nrmlPulse
-    goto    xtndPulse
+    ServoPulse  SRV2OUT, srv2NowH, srv2NowL, SRV2XTND
 
 srv3Pulse
-    bsf     SRV3OUT         ; Turn on servo 3 control output
-
-    movf    srv3NowH,W      ; Get high byte of duration for position ...
-    movwf   TMR1L           ; ... and save in low byte of timer1
-
-    movf    srv3NowL,W      ; Get low byte of duration for position
-
-    btfss   SRV3XTND        ; Skip if servo 3 extended travel is selected
-    goto    nrmlPulse
-    goto    xtndPulse
+    ServoPulse  SRV3OUT, srv3NowH, srv3NowL, SRV3XTND
 
 srv4Pulse
-    bsf     SRV4OUT         ; Turn on servo 4 control output
-
-    movf    srv4NowH,W      ; Get high byte of duration for position ...
-    movwf   TMR1L           ; ... and save in low byte of timer1
-
-    movf    srv4NowL,W      ; Get low byte of duration for position
-
-    btfss   SRV4XTND        ; Skip if servo 4 extended travel is selected
-    goto    nrmlPulse
-    goto    xtndPulse
+    ServoPulse  SRV4OUT, srv4NowH, srv4NowL, SRV4XTND
 
 
 ;**********************************************************************
@@ -1847,38 +1873,7 @@ loadSetting
 
     bsf     SYNCEDIND       ; Set servo settings synchronised indicator
 
-    ; Initialise servo movement positions
-    ;******************************************************************
-
-    ; Servo 1
-    movf    srv1Off,W       ; Set current position as Off setting
-    btfsc   SRV1ON          ; Skip if input is off ...
-    movf    srv1On,W        ; ... else set current position as On setting
-    movwf   srv1NowH
-    clrf    srv1NowL
-
-    ; Servo 2
-    movf    srv2Off,W       ; Set current position as Off setting
-    btfsc   SRV2ON          ; Skip if input is off ...
-    movf    srv2On,W        ; ... else set current position as On setting
-    movwf   srv2NowH
-    clrf    srv2NowL
-
-    ; Servo 3
-    movf    srv3Off,W       ; Set current position as Off setting
-    btfsc   SRV3ON          ; Skip if input is off ...
-    movf    srv3On,W        ; ... else set current position as On setting
-    movwf   srv3NowH
-    clrf    srv3NowL
-
-    ; Servo 4
-    movf    srv4Off,W       ; Set current position as Off setting
-    btfsc   SRV4ON          ; Skip if input is off ...
-    movf    srv4On,W        ; ... else set current position as On setting
-    movwf   srv4NowH
-    clrf    srv4NowL
-
-    ; Initialise all servo movement sequences to Off drive shutdown
+    ; Initialise servo movement positions and sequences
     ;******************************************************************
 
     movlw   SRVOFFEND
@@ -1887,14 +1882,17 @@ loadSetting
     movwf   srv3State
     movwf   srv4State
 
-    btfsc   SRV1ON                  ; Skip if input is off ...
-    bsf     srv1State,SRVONSTBIT    ; ... else change state to On shutdown
-    btfsc   SRV2ON                  ; Skip if input is off ...
-    bsf     srv2State,SRVONSTBIT    ; ... else change state to On shutdown
-    btfsc   SRV3ON                  ; Skip if input is off ...
-    bsf     srv3State,SRVONSTBIT    ; ... else change state to On shutdown
-    btfsc   SRV4ON                  ; Skip if input is off ...
-    bsf     srv4State,SRVONSTBIT    ; ... else change state to On shutdown
+    ; Servo 1
+    ServoInit    srv1Off, srv1On, SRV1ON, srv1NowH, srv2NowL, srv1State
+
+    ; Servo 2
+    ServoInit    srv2Off, srv2On, SRV2ON, srv2NowH, srv2NowL, srv2State
+
+    ; Servo 3
+    ServoInit    srv3Off, srv3On, SRV3ON, srv3NowH, srv3NowL, srv3State
+
+    ; Servo 4
+    ServoInit    srv4Off, srv4On, SRV4ON, srv4NowH, srv4NowL, srv4State
 
     movlw   DRVONMASK       ; Ensure all drive outputs are enabled
     iorwf   sysFlags,F
@@ -2088,76 +2086,10 @@ getServoTarget
 ;**********************************************************************
 updateAllServos
 
-    btfsc   SRV1ON          ; Skip if input off ...
-    goto    updateSrv1On    ; ... else perform servo On update
-
-updateSrv1Off
-    ServoOffState  srv1State
-
-    movlw   srv1OffRate
-    goto    ServoUpdate1
-
-updateSrv1On
-    ServoOnState   srv1State
-
-    movlw   srv1OnRate
-
-ServoUpdate1
-    ServoUpdate    srv1State, srv1NowL, SRV1EN
-
-updateSrv2
-    btfsc   SRV2ON          ; Skip if input off ...
-    goto    updateSrv2On    ; ... else perform servo On update
-
-updateSrv2Off
-    ServoOffState  srv2State
-
-    movlw   srv2OffRate
-    goto    ServoUpdate2
-
-updateSrv2On
-    ServoOnState   srv2State
-
-    movlw   srv2OnRate
-
-ServoUpdate2
-    ServoUpdate    srv2State, srv2NowL, SRV2EN
-
-updateSrv3
-    btfsc   SRV3ON          ; Skip if input off ...
-    goto    updateSrv3On    ; ... else perform servo On update
-
-updateSrv3Off
-    ServoOffState  srv3State
-
-    movlw   srv3OffRate
-    goto    ServoUpdate3
-
-updateSrv3On
-    ServoOnState   srv3State
-
-    movlw   srv3OnRate
-
-ServoUpdate3
-    ServoUpdate    srv3State, srv3NowL, SRV3EN
-
-updateSrv4
-    btfsc   SRV4ON          ; Skip if input off ...
-    goto    updateSrv4On    ; ... else perform servo On update
-
-updateSrv4Off
-    ServoOffState  srv4State
-
-    movlw   srv4OffRate
-    goto    ServoUpdate4
-
-updateSrv4On
-    ServoOnState   srv4State
-
-    movlw   srv4OnRate
-
-ServoUpdate4
-    ServoUpdate    srv4State, srv4NowL, SRV4EN
+    UpdateServo  SRV1ON, srv1OffRate, srv1OnRate, srv1State, srv1NowL, SRV1EN
+    UpdateServo  SRV2ON, srv2OffRate, srv2OnRate, srv2State, srv2NowL, SRV2EN
+    UpdateServo  SRV3ON, srv3OffRate, srv3OnRate, srv3State, srv3NowL, SRV3EN
+    UpdateServo  SRV4ON, srv4OffRate, srv4OnRate, srv4State, srv4NowL, SRV4EN
     return
 
 
