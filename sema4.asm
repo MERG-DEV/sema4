@@ -303,9 +303,9 @@ TMR0OPTIONS EQU    B'00000110' ; Options: PORTA pull-ups enabled,
 ;**********************************************************************
 
 SRVOFFST    EQU    31          ; Initial state in "off" movement sequence
-SRVOFFEND   EQU    3           ; Initial state in "off" movement drive shutoff
+SRVOFFEND   EQU    4           ; Initial state in "off" movement drive shutoff
 SRVONST     EQU    63          ; Initial state in "on" movement sequence
-SRVONEND    EQU    35          ; Initial state in "on" movement drive shutoff
+SRVONEND    EQU    36          ; Initial state in "on" movement drive shutoff
 SRVMVMASK   EQU    B'00011100' ; Mask to test if movement sequence completed
 SRVONSTBIT  EQU    5           ; Bit indicates "on" or "off" movement sequence
 SRVLUMASK   EQU    B'00000111' ; Mask to isolate movement setting offset index
@@ -629,7 +629,7 @@ ServoInit  macro    Off, On, ONf, ONb, NowH, NowL, State
 
 ;**********************************************************************
 ; Macro: Servo current position update                                *
-;     Rate (speed) address in W                                       *
+;     W holds base address (rate) of settings for direction of travel *
 ;**********************************************************************
 ServoUpdate  macro  State, NowL, DIS
 
@@ -642,13 +642,13 @@ ServoUpdate  macro  State, NowL, DIS
     btfsc   STATUS,Z        ; Skip if movement not yet complete ...
     goto    checkTimer      ; ... otherwise skip movement update
 
-    ; Set indirect addressing for servo settings and update current position
+    ; Servo movement in progress, update current position
     ;******************************************************************
 
     bcf     sysFlags,DIS    ; Ensure servo drive is enabled
 
-    movf    State,W         ; Servo current state in W
-    call    getServoTarget  ; Get servo current state target position in temp1
+    movf    State,W         ; Servo current movement state in W
+    call    getServoTarget  ; temp1 = target position, temp2 = rate for state
 
     movlw   NowL            ; Load servo current position low byte address ...
     movwf   FSR             ; ... into indirect addressing register
@@ -794,7 +794,7 @@ runCycle
 
     movlw   OUTMASK
     andwf   sysFlags,W
-    iorwf   portCval,F      ; Turn on disabled servo control outputs
+    iorwf   portCval,F      ; Turn back on disabled servo control outputs
 
     incf    cycleState,F    ; Advance to next state
 
@@ -936,6 +936,8 @@ endISR
 
     retfie                  ; Return from interrupt
 
+    ; Start pulse for servos, jumped to from beggining of ISR
+    ;******************************************************************
 
 srv1Pulse
     bcf     RUNMAIN         ; Disable main program loop
@@ -1079,7 +1081,7 @@ initialise
     ; Output banner message
     ;******************************************************************
 
-    bsf     RUNMAIN         ; Stop delay loop aborting
+    bsf     RUNMAIN         ; Stop delay loop aborting during serial Tx
 
     movlw   'S'
     call    dataSrlTx
@@ -1192,16 +1194,16 @@ testSrlRx
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
     goto    main            ; ... otherwise abort
 
-    btfsc   SERRXIN         ; Test for serial input connected ...
-    goto    testSrlRx       ; ... else loop looking for serial input connected
+    btfsc   SERRXIN         ; Skip if serial input connected ...
+    goto    testSrlRx       ; ... else loop looking for connection
 
 syncSrlRx
     btfss   RUNMAIN         ; Skip if main program loop enabled ...
     goto    main            ; ... otherwise abort
 
-    call    nullSrlRx       ; Receive null byte via serial input
+    call    nullSrlRx       ; Receive initial null byte via serial input
     btfss   RXDATAIND       ; Skip if received a null ...
-    goto    syncSrlRx       ; ... otherwise abort
+    goto    syncSrlRx       ; ... otherwise abort and restart synchronisation
 
     ; Synchronised to null byte, receive command (1 byte) and value (3 bytes)
     ;******************************************************************
@@ -1211,7 +1213,7 @@ syncSrlRx
 
     call    dataSrlRx       ; Receive byte via serial input
     btfss   RXDATAIND       ; Skip if received a byte ...
-    goto    syncSrlRx       ; ... otherwise abort
+    goto    syncSrlRx       ; ... otherwise abort and restart synchronisation
 
     btfsc   temp3,ASCIIBIT  ; Test received byte is an ASCII character ...
     goto    syncSrlRx       ; ... otherwise abort
@@ -1224,7 +1226,7 @@ syncSrlRx
 
     call    digitSrlRx      ; Receive digit via serial input
     btfss   RXDATAIND       ; Skip if received a digit ...
-    goto    syncSrlRx       ; ... otherwise abort
+    goto    syncSrlRx       ; ... otherwise abort and restart synchronisation
 
     ; Initialise command value with hundreds digit, can only be 0, 100, or 200
     clrw                    ; Start with 0
@@ -1239,7 +1241,7 @@ syncSrlRx
 
     call    digitSrlRx      ; Receive digit via serial input
     btfss   RXDATAIND       ; Skip if received a digit ...
-    goto    syncSrlRx       ; ... otherwise abort
+    goto    syncSrlRx       ; ... otherwise abort and restart synchronisation
 
     ; Add tens digit to command value
     call    asciiTens
@@ -1250,7 +1252,7 @@ syncSrlRx
 
     call    digitSrlRx      ; Receive digit via serial input
     btfss   RXDATAIND       ; Skip if received a digit ...
-    goto    syncSrlRx       ; ... otherwise abort
+    goto    syncSrlRx       ; ... otherwise abort and restart synchronisation
 
     movf    temp3,W
     addwf   temp4,F         ; Add units digit to command value
@@ -1345,10 +1347,8 @@ commandTable
     ;******************************************************************
 
 srv1SetOffPosition
-    movf    temp4,W         ; Store received value ...
-    movwf   srv1Off1        ; ... as ...
-    movwf   srv1Off2        ; ... servo ...
-    movwf   srv1Off3        ; ... Off bounce positions (Servo4 compatabillity)
+    movlw   srv1Off1        ; Store received value as ...
+    call    servo4Bnc       ; ... Off bounce positions (Servo4 compatabillity)
 
 srv1SetOffOnly
     movf    temp4,W         ; Store received value ...
@@ -1376,10 +1376,8 @@ received1OffPosition
     goto    received1Position
 
 srv1SetOnPosition
-    movf    temp4,W         ; Store received value ...
-    movwf   srv1On1         ; ... as ...
-    movwf   srv1On2         ; ... servo ...
-    movwf   srv1On3         ; ... On bounce positions (Servo4 compatabillity)
+    movlw   srv1On1         ; Store received value as ...
+    call    servo4Bnc       ; ... On bounce positions (Servo4 compatabillity)
 
 srv1SetOnOnly
     movf    temp4,W         ; Store received value ...
@@ -1404,15 +1402,16 @@ received1OnPosition
     movwf   srv1NowH        ; Set current position as received setting value
     bsf     SRV1ON          ; Set servo input on
     movlw   SRVONEND        ; Initial movement state is On drive shutdown
+
 received1Position
     movwf   srv1State       ; Set movement state
     clrf    srv1NowL
-    bcf     sysFlags,SRV1DIS ; Enable servo drive output
     goto    receivedSetting
 
 srv1SetOffRate
     call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
     movwf   temp4
+
 srv1NewOffRate
     comf    temp4,W         ; Complement received value ...
     btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
@@ -1423,6 +1422,7 @@ srv1NewOffRate
 srv1SetOnRate
     call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
     movwf   temp4
+
 srv1NewOnRate
     comf    temp4,W         ; Complement received value ...
     btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
@@ -1431,10 +1431,8 @@ srv1NewOnRate
     goto    receivedRate
 
 srv2SetOffPosition
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2Off1        ; ... as ...
-    movwf   srv2Off2        ; ... servo ...
-    movwf   srv2Off3        ; ... Off bounce positions (Servo4 compatabillity)
+    movlw   srv2Off1        ; Store received value as ...
+    call    servo4Bnc       ; ... Off bounce positions (Servo4 compatabillity)
 
 srv2SetOffOnly
     movf    temp4,W         ; Store received value ...
@@ -1462,10 +1460,8 @@ received2OffPosition
     goto    received2Position
 
 srv2SetOnPosition
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2On1         ; ... as ...
-    movwf   srv2On2         ; ... servo ...
-    movwf   srv2On3         ; ... On bounce positions (Servo4 compatabillity)
+    movlw   srv2On1         ; Store received value as ...
+    call    servo4Bnc       ; ... On bounce positions (Servo4 compatabillity)
 
 srv2SetOnOnly
     movf    temp4,W         ; Store received value ...
@@ -1490,15 +1486,16 @@ received2OnPosition
     movwf   srv2NowH        ; Set current position as received setting value
     bsf     SRV2ON          ; Set servo input on
     movlw   SRVONEND        ; Initial movement state is On drive shutdown
+
 received2Position
     movwf   srv2State       ; Set movement state
     clrf    srv2NowL
-    bcf     sysFlags,SRV2DIS ; Enable servo drive output
     goto    receivedSetting
 
 srv2SetOffRate
     call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
     movwf   temp4
+
 srv2NewOffRate
     comf    temp4,W         ; Complement received value ...
     btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
@@ -1509,6 +1506,7 @@ srv2NewOffRate
 srv2SetOnRate
     call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
     movwf   temp4
+
 srv2NewOnRate
     comf    temp4,W         ; Complement received value ...
     btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
@@ -1517,10 +1515,8 @@ srv2NewOnRate
     goto    receivedRate
 
 srv3SetOffPosition
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3Off1        ; ... as ...
-    movwf   srv3Off2        ; ... servo ...
-    movwf   srv3Off3        ; ... Off bounce positions (Servo4 compatabillity)
+    movlw   srv3Off1        ; Store received value as ...
+    call    servo4Bnc       ; ... Off bounce positions (Servo4 compatabillity)
 
 srv3SetOffOnly
     movf    temp4,W         ; Store received value ...
@@ -1548,10 +1544,8 @@ received3OffPosition
     goto    received3Position
 
 srv3SetOnPosition
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3On1         ; ... as ...
-    movwf   srv3On2         ; ... servo ...
-    movwf   srv3On3         ; ... On bounce positions (Servo4 compatabillity)
+    movlw   srv3On1         ; Store received value as ...
+    call    servo4Bnc       ; ... On bounce positions (Servo4 compatabillity)
 
 srv3SetOnOnly
     movf    temp4,W         ; Store received value ...
@@ -1576,15 +1570,16 @@ received3OnPosition
     movwf   srv3NowH        ; Set current position as received setting value
     bsf     SRV3ON          ; Set servo input on
     movlw   SRVONEND        ; Initial movement state is On drive shutdown
+
 received3Position
     movwf   srv3State       ; Set movement state
     clrf    srv3NowL
-    bcf     sysFlags,SRV3DIS ; Enable servo drive output
     goto    receivedSetting
 
 srv3SetOffRate
     call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
     movwf   temp4
+
 srv3NewOffRate
     comf    temp4,W         ; Complement received value ...
     btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
@@ -1595,6 +1590,7 @@ srv3NewOffRate
 srv3SetOnRate
     call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
     movwf   temp4
+
 srv3NewOnRate
     comf    temp4,W         ; Complement received value ...
     btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
@@ -1603,10 +1599,8 @@ srv3NewOnRate
     goto    receivedRate
 
 srv4SetOffPosition
-    movf    temp4,W         ; Store received value ...
-    movwf   srv4Off1        ; ... as ...
-    movwf   srv4Off2        ; ... servo ...
-    movwf   srv4Off3        ; ... Off bounce positions (Servo4 compatabillity)
+    movlw   srv4Off1        ; Store received value as ...
+    call    servo4Bnc       ; ... Off bounce positions (Servo4 compatabillity)
 
 srv4SetOffOnly
     movf    temp4,W         ; Store received value ...
@@ -1634,10 +1628,8 @@ received4OffPosition
     goto    received4Position
 
 srv4SetOnPosition
-    movf    temp4,W         ; Store received value ...
-    movwf   srv4On1         ; ... as ...
-    movwf   srv4On2         ; ... servo ...
-    movwf   srv4On3         ; ... On bounce positions (Servo4 compatabillity)
+    movlw   srv4On1         ; Store received value as ...
+    call    servo4Bnc       ; ... On bounce positions (Servo4 compatabillity)
 
 srv4SetOnOnly
     movf    temp4,W         ; Store received value ...
@@ -1662,15 +1654,16 @@ received4OnPosition
     movwf   srv4NowH        ; Set current position as received setting value
     bsf     SRV4ON          ; Set servo input on
     movlw   SRVONEND        ; Initial movement state is On drive shutdown
+
 received4Position
     movwf   srv4State       ; Set movement state
     clrf    srv4NowL
-    bcf     sysFlags,SRV4DIS ; Enable servo drive output
     goto    receivedSetting
 
 srv4SetOffRate
     call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
     movwf   temp4
+
 srv4NewOffRate
     comf    temp4,W         ; Complement received value ...
     btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
@@ -1681,6 +1674,7 @@ srv4NewOffRate
 srv4SetOnRate
     call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
     movwf   temp4
+
 srv4NewOnRate
     comf    temp4,W         ; Complement received value ...
     btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
@@ -1695,7 +1689,7 @@ receivedRate
 
     clrf    freezeTime      ; Clear setting mode timeout (read physical inputs)
 
-    goto    syncSrlRx       ; Loop looking for more serial data
+    goto    syncSrlRx       ; Loop looking for next command sequence
 
     ; Common end action for position setting command
     ;******************************************************************
@@ -1706,7 +1700,7 @@ receivedSetting
     movlw   TIMEFREEZE      ; Set setting mode timeout (ignore physical inputs)
     movwf   freezeTime
 
-    goto    syncSrlRx       ; Loop looking for more serial data
+    goto    syncSrlRx       ; Loop looking for next command sequence
 
     ; Received servo extended travel selections
     ;******************************************************************
@@ -1718,7 +1712,7 @@ receivedXtnd
     andlw   XTNDMASK        ; Isolate received servo option selections
     iorwf   srvCtrl,F       ; Set servo option selections
 
-    goto    syncSrlRx       ; Loop looking for more serial data
+    goto    syncSrlRx       ; Loop looking for next command sequence
 
     ; Actions for commands other than position or rate setting
     ;******************************************************************
@@ -1730,7 +1724,7 @@ receivedCommand
     goto    testForStore    ; ... otherwise test for store command
 
     clrf    freezeTime      ; Clear setting mode timeout (read physical inputs)
-    goto    syncSrlRx       ; Loop looking for more serial data
+    goto    syncSrlRx       ; Loop looking for next command sequence
 
 testForStore
     movf    temp2,W         ; Test if command ...
@@ -1739,7 +1733,7 @@ testForStore
     goto    testForReset    ; ... otherwise test for reset command
 
     btfsc   SYNCEDIND       ; Skip if settings not synchronised with EEPROM ...
-    goto    syncSrlRx       ; ... else loop looking for more serial data
+    goto    syncSrlRx       ; ... else loop looking for next command sequence
 
     ; Store settings to EEPROM
     ;******************************************************************
@@ -1763,7 +1757,7 @@ storeSetting
 
     bsf     SYNCEDIND       ; Set servo settings synchronised indicator
 
-    goto    syncSrlRx       ; Loop looking for more serial data
+    goto    syncSrlRx       ; Loop looking for next command sequence
 
 testForReset
     movf    temp2,W         ; Test if command ...
@@ -1780,7 +1774,7 @@ testForReboot
     btfsc   STATUS,Z        ; ... if not skip ...
     goto    bootVector      ; ... otherwise reboot
 
-    goto    syncSrlRx       ; Loop looking for more serial data
+    goto    syncSrlRx       ; Loop looking for next command sequence
 
 
 ;**********************************************************************
@@ -1917,6 +1911,22 @@ scanServoInputs
     clrw                    ; ... to ...
     goto    writeEEPROM     ; EEPROM
 
+
+;**********************************************************************
+; Servo4 compatability bounce setting subroutine                      *
+;     Address of first bounce position in W                           *
+;     Position setting in temp4                                       *
+;**********************************************************************
+servo4Bnc
+    movwf   FSR             ; Indirectly address bounce position settings
+    movf    temp4,W         ; Load position setting into W
+    movwf   INDF            ; Set bounce 1 position
+    incf    FSR,F           ; Indirectly address next bounce position setting
+    movwf   INDF            ; Set bounce 2 position
+    incf    FSR,F           ; Indirectly address next bounce position setting
+    movwf   INDF            ; Set bounce 3 position
+
+    return
 
 ;**********************************************************************
 ; RS232 sync subroutine                                               *
