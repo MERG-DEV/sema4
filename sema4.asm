@@ -728,6 +728,8 @@ doUpdate
 
 ;**********************************************************************
 ; Macro: Interrupt set servo pulse duration                           *
+;     Puts high byte of current position into timer1 low byte         *
+;     Puts low byte of current position into accumulator              *
 ;**********************************************************************
 ServoPulse  macro  OUTf, OUTb, NowH, NowL, XTNDf, XTNDb
 
@@ -861,6 +863,9 @@ cycleStateTable
     ; Produce a pulse between 0.5 and 2.5 mSec
     ;******************************************************************
 
+    ; High byte of current position is in timer1 low byte
+    ; Low byte of current position is accumulator
+
 xtndPulse
     iorlw   B'00011111'     ; Mask all but duration low byte top three bits ...
     movwf   TMR1H           ; ... and save in high byte of timer1
@@ -891,6 +896,9 @@ xtndPulse
     ; Produce a pulse between 1 and 2 mSec
     ;******************************************************************
 
+    ; High byte of current position is in timer1 low byte
+    ; Low byte of current position is in accumulator
+
 nrmlPulse
     iorlw   B'00111111'     ; Mask all but duration low byte top two bits ...
     movwf   TMR1H           ; ... and save in high byte of timer1
@@ -902,7 +910,7 @@ nrmlPulse
 
     ; Duration of position part of pulse x 4 forms first ten bits of timer1
     ; Puts upper two bits of position duration low byte into timer
-    ; Also adjust timer1 high byte for any borrow from low byte subtraction
+    ; Also adjusts timer1 high byte for any borrow from low byte subtraction
     ; Results in a pulse length between 1.004 and 2.024 mSecs
     rlf     TMR1H,F         ; Rotate timer1H <- borrow, carry <- position bit 7
     rlf     TMR1L,F         ; Rotate timer1L <- position bit 7, carry <- bit 15
