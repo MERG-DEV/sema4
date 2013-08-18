@@ -158,6 +158,10 @@
 ;       start of a command sequence.                                  *
 ;       Inverted sense of drive enable flags to be drive disable.     *
 ;                                                                     *
+;    18 Aug 2013 - Chris White:                                       *
+;       Defined more macros to reduce duplication of code common to   *
+;       all servos, this time for handling received commands.         *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
@@ -1343,7 +1347,7 @@ commandTable
     error "Received command jump table spans 8 bit boundary"
 #endif
 
-    ; Actions for position or rate setting command
+    ; Servo 1 specific actions for specific position setting commands
     ;******************************************************************
 
 srv1SetOffPosition
@@ -1351,62 +1355,250 @@ srv1SetOffPosition
     call    servo4Bnc       ; ... Off bounce positions (Servo4 compatabillity)
 
 srv1SetOffOnly
-    movf    temp4,W         ; Store received value ...
-    movwf   srv1Off         ; ... as servo Off position
-    goto    received1OffPosition
+    movlw   srv1Off         ; Store servo Off position
+    goto    srv1OffPosition
 
 srv1SetOff1Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv1Off1        ; ... as servo Off bounce 1 position
-    goto    received1OffPosition
+    movlw   srv1Off1        ; Store servo Off bounce 1 position
+    goto    srv1OffPosition
 
 srv1SetOff2Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv1Off2        ; ... as servo Off bounce 2 position
-    goto    received1OffPosition
+    movlw   srv1Off2        ; Store servo Off bounce 2 position
+    goto    srv1OffPosition
 
 srv1SetOff3Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv1Off3        ; ... as servo Off bounce 3 position
+    movlw   srv1Off3        ; Store servo Off bounce 3 position
 
-received1OffPosition
-    movwf   srv1NowH        ; Set current position as received setting value
-    bcf     SRV1ON          ; Set servo input off
+srv1OffPosition
+    movwf   FSR
     movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
-    goto    received1Position
+    bcf     SRV1ON          ; Set servo input off
+    goto    srv1Position
 
 srv1SetOnPosition
     movlw   srv1On1         ; Store received value as ...
     call    servo4Bnc       ; ... On bounce positions (Servo4 compatabillity)
 
 srv1SetOnOnly
-    movf    temp4,W         ; Store received value ...
-    movwf   srv1On          ; ... as servo On position
-    goto    received1OnPosition
+    movlw   srv1On          ; Store servo On position
+    goto    srv1OnPosition
 
 srv1SetOn1Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv1On1         ; ... as servo On bounce 1 position
-    goto    received1OnPosition
+    movlw   srv1On1         ; Store servo On bounce 1 position
+    goto    srv1OnPosition
 
 srv1SetOn2Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv1On2         ; ... as servo On bounce 2 position
-    goto    received1OnPosition
+    movlw   srv1On2         ; Store servo On bounce 2 position
+    goto    srv1OnPosition
 
 srv1SetOn3Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv1On3         ; ... as servo On bounce 3 position
+    movlw   srv1On3         ; Store servo On bounce 3 position
 
-received1OnPosition
-    movwf   srv1NowH        ; Set current position as received setting value
-    bsf     SRV1ON          ; Set servo input on
+srv1OnPosition
+    movwf   FSR
     movlw   SRVONEND        ; Initial movement state is On drive shutdown
+    bsf     SRV1ON          ; Set servo input on
 
-received1Position
+srv1Position
     movwf   srv1State       ; Set movement state
+    movf    temp4,W
+    movwf   INDF
+    movwf   srv1NowH        ; Set current position as received setting value
     clrf    srv1NowL
     goto    receivedSetting
+
+    ; Servo 2 specific actions for specific position setting commands
+    ;******************************************************************
+
+srv2SetOffPosition
+    movlw   srv2Off1        ; Store received value as ...
+    call    servo4Bnc       ; ... Off bounce positions (Servo4 compatabillity)
+
+srv2SetOffOnly
+    movlw   srv2Off         ; Store servo Off position
+    goto    srv2OffPosition
+
+srv2SetOff1Position
+    movlw   srv2Off1        ; Store servo Off bounce 1 position
+    goto    srv2OffPosition
+
+srv2SetOff2Position
+    movlw   srv2Off2        ; Store servo Off bounce 2 position
+    goto    srv2OffPosition
+
+srv2SetOff3Position
+    movlw   srv2Off3        ; Store servo Off bounce 3 position
+
+srv2OffPosition
+    movwf   FSR
+    movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
+    bcf     SRV2ON          ; Set servo input off
+    goto    srv2Position
+
+srv2SetOnPosition
+    movlw   srv2On1         ; Store received value as ...
+    call    servo4Bnc       ; ... On bounce positions (Servo4 compatabillity)
+
+srv2SetOnOnly
+    movlw   srv2On          ; Store servo On position
+    goto    srv2OnPosition
+
+srv2SetOn1Position
+    movlw   srv2On1         ; Store servo On bounce 1 position
+    goto    srv2OnPosition
+
+srv2SetOn2Position
+    movlw   srv2On2         ; Store servo On bounce 2 position
+    goto    srv2OnPosition
+
+srv2SetOn3Position
+    movlw   srv2On3         ; Store servo On bounce 3 position
+
+srv2OnPosition
+    movwf   FSR
+    movlw   SRVONEND        ; Initial movement state is On drive shutdown
+    bsf     SRV2ON          ; Set servo input on
+
+srv2Position
+    movwf   srv2State       ; Set movement state
+    movf    temp4,W
+    movwf   INDF
+    movwf   srv2NowH        ; Set current position as received setting value
+    clrf    srv2NowL
+    goto    receivedSetting
+
+    ; Servo 3 specific actions for specific position setting commands
+    ;******************************************************************
+
+srv3SetOffPosition
+    movlw   srv3Off1        ; Store received value as ...
+    call    servo4Bnc       ; ... Off bounce positions (Servo4 compatabillity)
+
+srv3SetOffOnly
+    movlw   srv3Off         ; Store servo Off position
+    goto    srv3OffPosition
+
+srv3SetOff1Position
+    movlw   srv3Off1        ; Store servo Off bounce 1 position
+    goto    srv3OffPosition
+
+srv3SetOff2Position
+    movlw   srv3Off2        ; Store servo Off bounce 2 position
+    goto    srv3OffPosition
+
+srv3SetOff3Position
+    movlw   srv3Off3        ; Store servo Off bounce 3 position
+
+srv3OffPosition
+    movwf   FSR
+    movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
+    bcf     SRV3ON          ; Set servo input off
+    goto    srv3Position
+
+srv3SetOnPosition
+    movlw   srv3On1         ; Store received value as ...
+    call    servo4Bnc       ; ... On bounce positions (Servo4 compatabillity)
+
+srv3SetOnOnly
+    movlw   srv3On          ; Store servo On position
+    goto    srv3OnPosition
+
+srv3SetOn1Position
+    movlw   srv3On1         ; Store servo On bounce 1 position
+    goto    srv3OnPosition
+
+srv3SetOn2Position
+    movlw   srv3On2         ; Store servo On bounce 2 position
+    goto    srv3OnPosition
+
+srv3SetOn3Position
+    movlw   srv3On3         ; Store servo On bounce 3 position
+
+srv3OnPosition
+    movwf   FSR
+    movlw   SRVONEND        ; Initial movement state is On drive shutdown
+    bsf     SRV3ON          ; Set servo input on
+
+srv3Position
+    movwf   srv3State       ; Set movement state
+    movf    temp4,W
+    movwf   INDF
+    movwf   srv3NowH        ; Set current position as received setting value
+    clrf    srv3NowL
+    goto    receivedSetting
+
+    ; Servo 4 specific actions for specific position setting commands
+    ;******************************************************************
+
+srv4SetOffPosition
+    movlw   srv4Off1        ; Store received value as ...
+    call    servo4Bnc       ; ... Off bounce positions (Servo4 compatabillity)
+
+srv4SetOffOnly
+    movlw   srv4Off         ; Store servo Off position
+    goto    srv4OffPosition
+
+srv4SetOff1Position
+    movlw   srv4Off1        ; Store servo Off bounce 1 position
+    goto    srv4OffPosition
+
+srv4SetOff2Position
+    movlw   srv4Off2        ; Store servo Off bounce 2 position
+    goto    srv4OffPosition
+
+srv4SetOff3Position
+    movlw   srv4Off3        ; Store servo Off bounce 3 position
+
+srv4OffPosition
+    movwf   FSR
+    movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
+    bcf     SRV4ON          ; Set servo input off
+    goto    srv4Position
+
+srv4SetOnPosition
+    movlw   srv4On1         ; Store received value as ...
+    call    servo4Bnc       ; ... On bounce positions (Servo4 compatabillity)
+
+srv4SetOnOnly
+    movlw   srv4On          ; Store servo On position
+    goto    srv4OnPosition
+
+srv4SetOn1Position
+    movlw   srv4On1         ; Store servo On bounce 1 position
+    goto    srv4OnPosition
+
+srv4SetOn2Position
+    movlw   srv4On2         ; Store servo On bounce 2 position
+    goto    srv4OnPosition
+
+srv4SetOn3Position
+    movlw   srv4On3         ; Store servo On bounce 3 position
+
+srv4OnPosition
+    movwf   FSR
+    movlw   SRVONEND        ; Initial movement state is On drive shutdown
+    bsf     SRV4ON          ; Set servo input on
+
+srv4Position
+    movwf   srv4State       ; Set movement state
+    movf    temp4,W
+    movwf   INDF
+    movwf   srv4NowH        ; Set current position as received setting value
+    clrf    srv4NowL
+
+    ; Common end action for position setting commands
+    ;******************************************************************
+
+receivedSetting
+    bcf     SYNCEDIND       ; Clear servo settings synchronised indicator
+
+    movlw   TIMEFREEZE      ; Set setting mode timeout (ignore physical inputs)
+    movwf   freezeTime
+
+    goto    syncSrlRx       ; Loop looking for next command sequence
+
+    ; Servo 1 specific actions for rate setting commands
+    ;******************************************************************
 
 srv1SetOffRate
     call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
@@ -1430,67 +1622,8 @@ srv1NewOnRate
     movwf   srv1OnRate      ; ... and store as servo On rate
     goto    receivedRate
 
-srv2SetOffPosition
-    movlw   srv2Off1        ; Store received value as ...
-    call    servo4Bnc       ; ... Off bounce positions (Servo4 compatabillity)
-
-srv2SetOffOnly
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2Off         ; ... as servo Off position
-    goto    received2OffPosition
-
-srv2SetOff1Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2Off1        ; ... as servo Off bounce 1 position
-    goto    received2OffPosition
-
-srv2SetOff2Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2Off2        ; ... as servo Off bounce 2 position
-    goto    received2OffPosition
-
-srv2SetOff3Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2Off3        ; ... as servo Off bounce 3 position
-
-received2OffPosition
-    movwf   srv2NowH        ; Set current position as received setting value
-    bcf     SRV2ON          ; Set servo input off
-    movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
-    goto    received2Position
-
-srv2SetOnPosition
-    movlw   srv2On1         ; Store received value as ...
-    call    servo4Bnc       ; ... On bounce positions (Servo4 compatabillity)
-
-srv2SetOnOnly
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2On          ; ... as servo On position
-    goto    received2OnPosition
-
-srv2SetOn1Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2On1         ; ... as servo On bounce 1 position
-    goto    received2OnPosition
-
-srv2SetOn2Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2On2         ; ... as servo On bounce 2 position
-    goto    received2OnPosition
-
-srv2SetOn3Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv2On3         ; ... as servo On bounce 3 position
-
-received2OnPosition
-    movwf   srv2NowH        ; Set current position as received setting value
-    bsf     SRV2ON          ; Set servo input on
-    movlw   SRVONEND        ; Initial movement state is On drive shutdown
-
-received2Position
-    movwf   srv2State       ; Set movement state
-    clrf    srv2NowL
-    goto    receivedSetting
+    ; Servo 2 specific actions for rate setting commands
+    ;******************************************************************
 
 srv2SetOffRate
     call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
@@ -1514,67 +1647,8 @@ srv2NewOnRate
     movwf   srv2OnRate      ; ... and store as servo On rate
     goto    receivedRate
 
-srv3SetOffPosition
-    movlw   srv3Off1        ; Store received value as ...
-    call    servo4Bnc       ; ... Off bounce positions (Servo4 compatabillity)
-
-srv3SetOffOnly
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3Off         ; ... as servo Off position
-    goto    received3OffPosition
-
-srv3SetOff1Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3Off1        ; ... as servo Off bounce 1 position
-    goto    received3OffPosition
-
-srv3SetOff2Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3Off2        ; ... as servo Off bounce 2 position
-    goto    received3OffPosition
-
-srv3SetOff3Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3Off3        ; ... as servo Off bounce 3 position
-
-received3OffPosition
-    movwf   srv3NowH        ; Set current position as received setting value
-    bcf     SRV3ON          ; Set servo input off
-    movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
-    goto    received3Position
-
-srv3SetOnPosition
-    movlw   srv3On1         ; Store received value as ...
-    call    servo4Bnc       ; ... On bounce positions (Servo4 compatabillity)
-
-srv3SetOnOnly
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3On          ; ... as servo On position
-    goto    received3OnPosition
-
-srv3SetOn1Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3On1         ; ... as servo On bounce 1 position
-    goto    received3OnPosition
-
-srv3SetOn2Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3On2         ; ... as servo On bounce 2 position
-    goto    received3OnPosition
-
-srv3SetOn3Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv3On3         ; ... as servo On bounce 3 position
-
-received3OnPosition
-    movwf   srv3NowH        ; Set current position as received setting value
-    bsf     SRV3ON          ; Set servo input on
-    movlw   SRVONEND        ; Initial movement state is On drive shutdown
-
-received3Position
-    movwf   srv3State       ; Set movement state
-    clrf    srv3NowL
-    goto    receivedSetting
+    ; Servo 3 specific actions for rate setting commands
+    ;******************************************************************
 
 srv3SetOffRate
     call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
@@ -1598,67 +1672,8 @@ srv3NewOnRate
     movwf   srv3OnRate      ; ... and store as servo On rate
     goto    receivedRate
 
-srv4SetOffPosition
-    movlw   srv4Off1        ; Store received value as ...
-    call    servo4Bnc       ; ... Off bounce positions (Servo4 compatabillity)
-
-srv4SetOffOnly
-    movf    temp4,W         ; Store received value ...
-    movwf   srv4Off         ; ... as servo Off position
-    goto    received4OffPosition
-
-srv4SetOff1Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv4Off1        ; ... as servo Off bounce 1 position
-    goto    received4OffPosition
-
-srv4SetOff2Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv4Off2        ; ... as servo Off bounce 2 position
-    goto    received4OffPosition
-
-srv4SetOff3Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv4Off3        ; ... as servo Off bounce 3 position
-
-received4OffPosition
-    movwf   srv4NowH        ; Set current position as received setting value
-    bcf     SRV4ON          ; Set servo input off
-    movlw   SRVOFFEND       ; Initial movement state is Off drive shutdown
-    goto    received4Position
-
-srv4SetOnPosition
-    movlw   srv4On1         ; Store received value as ...
-    call    servo4Bnc       ; ... On bounce positions (Servo4 compatabillity)
-
-srv4SetOnOnly
-    movf    temp4,W         ; Store received value ...
-    movwf   srv4On          ; ... as servo On position
-    goto    received4OnPosition
-
-srv4SetOn1Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv4On1         ; ... as servo On bounce 1 position
-    goto    received4OnPosition
-
-srv4SetOn2Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv4On2         ; ... as servo On bounce 2 position
-    goto    received4OnPosition
-
-srv4SetOn3Position
-    movf    temp4,W         ; Store received value ...
-    movwf   srv4On3         ; ... as servo On bounce 3 position
-
-received4OnPosition
-    movwf   srv4NowH        ; Set current position as received setting value
-    bsf     SRV4ON          ; Set servo input on
-    movlw   SRVONEND        ; Initial movement state is On drive shutdown
-
-received4Position
-    movwf   srv4State       ; Set movement state
-    clrf    srv4NowL
-    goto    receivedSetting
+    ; Servo 4 specific actions for rate setting commands
+    ;******************************************************************
 
 srv4SetOffRate
     call    convertSpeed    ; Convert Servo4 speed to Sema4 speed
@@ -1681,25 +1696,13 @@ srv4NewOnRate
     movlw   1               ; ... else limit to mininum speed ...
     movwf   srv4OnRate      ; ... and store as servo On rate
 
-    ; Common end action for rate setting command
+    ; Common end action for rate setting commands
     ;******************************************************************
 
 receivedRate
     bcf     SYNCEDIND       ; Clear servo settings synchronised indicator
 
     clrf    freezeTime      ; Clear setting mode timeout (read physical inputs)
-
-    goto    syncSrlRx       ; Loop looking for next command sequence
-
-    ; Common end action for position setting command
-    ;******************************************************************
-
-receivedSetting
-    bcf     SYNCEDIND       ; Clear servo settings synchronised indicator
-
-    movlw   TIMEFREEZE      ; Set setting mode timeout (ignore physical inputs)
-    movwf   freezeTime
-
     goto    syncSrlRx       ; Loop looking for next command sequence
 
     ; Received servo extended travel selections
