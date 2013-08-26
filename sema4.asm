@@ -162,6 +162,11 @@
 ;       Defined more macros to reduce duplication of code common to   *
 ;       all servos, this time for handling received commands.         *
 ;                                                                     *
+;    26 Aug 2013 - Chris White:                                       *
+;       Reduced movement states from 32 to 8 as if bounce was used as *
+;       an overshoot pause was noticeable between reaching end and    *
+;       starting "bounce" (overshoot).                                *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
@@ -306,13 +311,12 @@ TMR0OPTIONS EQU    B'00000110' ; Options: PORTA pull-ups enabled,
 ; Servo movement sequence state constants
 ;**********************************************************************
 
-SRVOFFST    EQU    31          ; Initial state in "off" movement sequence
-SRVOFFEND   EQU    4           ; Initial state in "off" movement drive shutoff
-SRVONST     EQU    63          ; Initial state in "on" movement sequence
-SRVONEND    EQU    36          ; Initial state in "on" movement drive shutoff
-SRVMVMASK   EQU    B'00011100' ; Mask to test if movement sequence completed
-SRVONSTBIT  EQU    5           ; Bit indicates "on" or "off" movement sequence
-SRVLUMASK   EQU    B'00000111' ; Mask to isolate movement setting offset index
+SRVOFFST    EQU    7           ; Initial state in "off" movement sequence
+SRVOFFEND   EQU    1           ; Initial state in "off" movement drive shutoff
+SRVONST     EQU    15          ; Initial state in "on" movement sequence
+SRVONEND    EQU    9           ; Initial state in "on" movement drive shutoff
+SRVMVMASK   EQU    B'00000111' ; Mask to test if movement sequence completed
+SRVONSTBIT  EQU    3           ; Bit indicates "on" or "off" movement sequence
 
 ; Servo settings limit values
 ;**********************************************************************
@@ -643,7 +647,7 @@ ServoUpdate  macro  State, NowL, DIS
 
     movlw   SRVMVMASK       ; Mask non movement states bits ...
     andwf   State,W         ; ... from servo movement state
-    btfsc   STATUS,Z        ; Skip if movement not yet complete ...
+    btfsc   STATUS,Z        ; Skip if all movement not yet complete ...
     goto    checkTimer      ; ... otherwise skip movement update
 
     ; Servo movement in progress, update current position
@@ -661,43 +665,30 @@ ServoUpdate  macro  State, NowL, DIS
 
     call    updateServo     ; Update servo current position
 
-    btfsc   STATUS,Z        ; Check if current and target positions match ...
-    decf    State,F         ; ... if so advance to next movement state
+    btfss   STATUS,Z        ; Check if current and target positions match ...
+    goto    endUpdate       ; ... if not keep moving
+
+    decf    State,F         ; Advance to next movement state
+    movlw   SRVMVMASK       ; Mask non movement states bits ...
+    andwf   State,W         ; ... from servo movement state
+    movlw   TIMEDRIVE
+    btfsc   STATUS,Z        ; Skip if all movement not yet complete ...
+    movwf   NowL            ; ... else load drive shutoff timer
     goto    endUpdate
 
 checkTimer
     ; Servo movement complete, if necessary perform drive shutoff
     ;******************************************************************
 
-    ; Use bits 0 and 1 as same behaviour regardless of movement direction
+    movf    NowL,F          ; Test drive shutoff timer ...
+    btfsc   STATUS,Z        ; ... skip if not expired ...
+    goto    endUpdate       ; ... else nothing to do
 
-    btfss   State,1         ; Skip if state 3 or 2
-    goto    state1or0
-
-state3or2
-    btfss   State,0         ; Skip if state 3 - load timer, go to state 2 ...
-    goto    runTimer        ; ... else state 2 - run shutoff timer
-
-loadTimer
-    movlw   TIMEDRIVE
-    movwf   NowL            ; Load drive shutoff timer
-    decf    State,F         ; Advance to next state, 2 or 1
-
-runTimer
     decfsz  NowL,F          ; Decrement timer, skip if expired ...
     goto    endUpdate       ; ... else remain in same state
 
-    btfss   State,0         ; Skip if state 1 - disable drive if selected ...
-    goto    loadTimer       ; ... else state 2 - reload timer, go to state 1
-
     btfsc   DRVOFF          ; Skip if drive shutoff not selected ...
     bsf     sysFlags,DIS    ; ... else disable servo drive
-
-    decf    State,F         ; Advance to state 0 - sequence complete
-
-state1or0
-    btfsc   State,0         ; Skip if state 0 - sequence complete ...
-    goto    runTimer        ; ... else state 1 - run shutoff timer
 
 endUpdate
 
@@ -992,7 +983,7 @@ asciiTensTable
 ;**********************************************************************
 convertSpeed
     SetPCLATH speedTable
-    movlw   0x0F
+    movlw   0x07
     andwf   temp4,W
     addwf   PCL,F
 
@@ -1013,37 +1004,32 @@ speedTable
 
 ;**********************************************************************
 ; Servo setting position offset for state lookup subroutine           *
-;     Servo movement state passed in temp1 (bits 7 to 2)              *
+;     Servo movement state passed in temp1 (bits 3 to 0)              *
 ;                                                                     *
 ;     Setting offset returned in W                                    *
-;     temp1 (state) divided by two because of rotation one bit right  *
 ;**********************************************************************
 getServoSettingOffset
     SetPCLATH settingOffsetTable
 
-    ; "Off" movement sequence states, state index decrements from 31 to 0
-    ; Actual movement completed after state 4, states 3 to 0 = drive shutoff
+    ; "Off" movement sequence states, state index decrements from 7 to 0
+    ; Actual movement completed after state 1, states 0 = drive shutoff
     ;
-    ; "On" movement sequence states, state index decrements from 63 to 32
-    ; Actual movement completed after state 36, states 35 to 32 = drive shutoff
-    ;
-    ; 4 states at each position to allow time for servo to physically catch up
-    ; 4 cycle times before next movement actually starts = 80 mSec
+    ; "On" movement sequence states, state index decrements from 15 to 8
+    ; Actual movement completed after state 9, states 8 = drive shutoff
 
-    rrf     temp1,F
-    rrf     temp1,W
-    andlw   SRVLUMASK   ; Isolate bits 0 to 4, makes states 63 to 32 == 31 to 0
+    movf    temp1,W     ; Load state into accumulator
+    andlw   SRVMVMASK   ; Isolate bits 0 to 2, makes states 15 to 8 == 7 to 0
     addwf   PCL,F
 
 settingOffsetTable
-    retlw   (srv1Off  - srv1OffRate) ; State  3 -  0, timeout drive shutoff
-    retlw   (srv1Off  - srv1OffRate) ; State  7 -  4, move back to end position
-    retlw   (srv1Off3 - srv1OffRate) ; State 11 -  8, move to 3rd bounce
-    retlw   (srv1Off  - srv1OffRate) ; State 15 - 12, move back to end position
-    retlw   (srv1Off2 - srv1OffRate) ; State 19 - 16, move to 2nd bounce
-    retlw   (srv1Off  - srv1OffRate) ; State 23 - 20, move back to end position
-    retlw   (srv1Off1 - srv1OffRate) ; State 27 - 24, move to 1st bounce
-    retlw   (srv1Off  - srv1OffRate) ; State 31 - 28, move to end position
+    retlw   (srv1Off  - srv1OffRate) ; State 0, timeout drive shutoff
+    retlw   (srv1Off  - srv1OffRate) ; State 1, final move back to end position
+    retlw   (srv1Off3 - srv1OffRate) ; State 2, move to 3rd bounce
+    retlw   (srv1Off  - srv1OffRate) ; State 3, move back to end position
+    retlw   (srv1Off2 - srv1OffRate) ; State 4, move to 2nd bounce
+    retlw   (srv1Off  - srv1OffRate) ; State 5, move back to end position
+    retlw   (srv1Off1 - srv1OffRate) ; State 6, move to 1st bounce
+    retlw   (srv1Off  - srv1OffRate) ; State 7, intial move to end position
 
 #if (high settingOffsetTable) != (high $)
     error "Servo setting offset lookup table spans 8 bit boundary"
@@ -1605,10 +1591,7 @@ srv1SetOffRate
     movwf   temp4
 
 srv1NewOffRate
-    comf    temp4,W         ; Complement received value ...
-    btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
-    movlw   1               ; ... else limit to mininum speed ...
-    movwf   srv1OffRate     ; ... and store as servo Off rate
+    movlw   srv1OffRate     ; Address servo 1 Off rate
     goto    receivedRate
 
 srv1SetOnRate
@@ -1616,10 +1599,7 @@ srv1SetOnRate
     movwf   temp4
 
 srv1NewOnRate
-    comf    temp4,W         ; Complement received value ...
-    btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
-    movlw   1               ; ... else limit to mininum speed ...
-    movwf   srv1OnRate      ; ... and store as servo On rate
+    movlw   srv1OnRate      ; Address servo 1 On rate
     goto    receivedRate
 
     ; Servo 2 specific actions for rate setting commands
@@ -1630,10 +1610,7 @@ srv2SetOffRate
     movwf   temp4
 
 srv2NewOffRate
-    comf    temp4,W         ; Complement received value ...
-    btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
-    movlw   1               ; ... else limit to mininum speed ...
-    movwf   srv2OffRate     ; ... and store as servo Off rate
+    movlw   srv2OffRate     ; Address servo 2 Off rate
     goto    receivedRate
 
 srv2SetOnRate
@@ -1641,10 +1618,7 @@ srv2SetOnRate
     movwf   temp4
 
 srv2NewOnRate
-    comf    temp4,W         ; Complement received value ...
-    btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
-    movlw   1               ; ... else limit to mininum speed ...
-    movwf   srv2OnRate      ; ... and store as servo On rate
+    movlw   srv2OnRate      ; Address servo 2 On rate
     goto    receivedRate
 
     ; Servo 3 specific actions for rate setting commands
@@ -1655,10 +1629,7 @@ srv3SetOffRate
     movwf   temp4
 
 srv3NewOffRate
-    comf    temp4,W         ; Complement received value ...
-    btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
-    movlw   1               ; ... else limit to mininum speed ...
-    movwf   srv3OffRate     ; ... and store as servo Off rate
+    movlw   srv3OffRate     ; Address servo 3 Off rate
     goto    receivedRate
 
 srv3SetOnRate
@@ -1666,10 +1637,7 @@ srv3SetOnRate
     movwf   temp4
 
 srv3NewOnRate
-    comf    temp4,W         ; Complement received value ...
-    btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
-    movlw   1               ; ... else limit to mininum speed ...
-    movwf   srv3OnRate      ; ... and store as servo On rate
+    movlw   srv3OnRate      ; Address servo 3 On rate
     goto    receivedRate
 
     ; Servo 4 specific actions for rate setting commands
@@ -1680,10 +1648,7 @@ srv4SetOffRate
     movwf   temp4
 
 srv4NewOffRate
-    comf    temp4,W         ; Complement received value ...
-    btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
-    movlw   1               ; ... else limit to mininum speed ...
-    movwf   srv4OffRate     ; ... and store as servo Off rate
+    movlw   srv4OffRate     ; Address servo 4 Off rate
     goto    receivedRate
 
 srv4SetOnRate
@@ -1691,15 +1656,18 @@ srv4SetOnRate
     movwf   temp4
 
 srv4NewOnRate
-    comf    temp4,W         ; Complement received value ...
-    btfsc   STATUS,Z        ; ... skip if compemented speed not zero ...
-    movlw   1               ; ... else limit to mininum speed ...
-    movwf   srv4OnRate      ; ... and store as servo On rate
+    movlw   srv4OnRate      ; Address servo 4 On rate
 
     ; Common end action for rate setting commands
     ;******************************************************************
 
 receivedRate
+    movwf   FSR             ; Indirectly address the appropriate servo rate
+    comf    temp4,W         ; Complement received value ...
+    btfsc   STATUS,Z        ; ... skip if complemented speed not zero ...
+    movlw   1               ; ... else limit to mininum speed ...
+    movwf   INDF            ; ... and store as the appropriate servo rate
+
     bcf     SYNCEDIND       ; Clear servo settings synchronised indicator
 
     clrf    freezeTime      ; Clear setting mode timeout (read physical inputs)
