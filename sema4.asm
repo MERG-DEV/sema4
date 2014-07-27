@@ -175,6 +175,16 @@
 ;       Depending on how you set the endpoints I think it may  work   *
 ;       for both UQ and LQ. Only used it for LQ so far                *
 ;                                                                     *
+;    27 Jul 2014 - Chris White:                                       *
+;       Made change of extended travel flags mark EEPROM as not       *
+;       synchronised same as for any setting value in order to ensure *
+;       these are written to EEPROM on receipt of "store" command.    *
+;       Corrected preservation of extended travel flags when changed  *
+;       control input bits written to EEPROM. Note - saved values are *
+;       overwritten with current values.                              *
+;       Added discrete commands to enable and disable extended travel *
+;       per servo, as opposed to setting all in a single command.     *
+;                                                                     *
 ;**********************************************************************
 ;                                                                     *
 ;                             +---+ +---+                             *
@@ -1095,7 +1105,7 @@ initialise
     call    dataSrlTx
     movlw   '4'
     call    dataSrlTx
-    movlw   'f'
+    movlw   'g'
     call    dataSrlTx
 
     ; Initialise RAM to zero
@@ -1341,6 +1351,12 @@ commandTable
 
     goto    receivedXtnd
 
+    ; Additional Sema4g commands
+    ;******************************************************************
+
+    goto    receivedXtndOn
+    goto    receivedXtndOff
+
 #if (high commandTable) != (high $)
     error "Received command jump table spans 8 bit boundary"
 #endif
@@ -1403,7 +1419,7 @@ srv1Position
     movwf   INDF
     movwf   srv1NowH        ; Set current position as received setting value
     clrf    srv1NowL
-    goto    receivedSetting
+    goto    receivedPosition
 
     ; Servo 2 specific actions for specific position setting commands
     ;******************************************************************
@@ -1463,7 +1479,7 @@ srv2Position
     movwf   INDF
     movwf   srv2NowH        ; Set current position as received setting value
     clrf    srv2NowL
-    goto    receivedSetting
+    goto    receivedPosition
 
     ; Servo 3 specific actions for specific position setting commands
     ;******************************************************************
@@ -1523,7 +1539,7 @@ srv3Position
     movwf   INDF
     movwf   srv3NowH        ; Set current position as received setting value
     clrf    srv3NowL
-    goto    receivedSetting
+    goto    receivedPosition
 
     ; Servo 4 specific actions for specific position setting commands
     ;******************************************************************
@@ -1587,12 +1603,12 @@ srv4Position
     ; Common end action for position setting commands
     ;******************************************************************
 
-receivedSetting
-    bcf     SYNCEDIND       ; Clear servo settings synchronised indicator
-
+receivedPosition
     movlw   TIMEFREEZE      ; Set setting mode timeout (ignore physical inputs)
     movwf   freezeTime
 
+receivedSetting
+    bcf     SYNCEDIND       ; Clear servo settings synchronised indicator
     goto    syncSrlRx       ; Loop looking for next command sequence
 
     ; Servo 1 specific actions for rate setting commands
@@ -1680,24 +1696,42 @@ receivedRate
     movlw   1               ; ... else limit to mininum speed ...
     movwf   INDF            ; ... and store as the appropriate servo rate
 
-    bcf     SYNCEDIND       ; Clear servo settings synchronised indicator
-
     clrf    freezeTime      ; Clear setting mode timeout (read physical inputs)
-    goto    syncSrlRx       ; Loop looking for next command sequence
+    goto    receivedSetting
 
     ; Received servo extended travel selections
     ;******************************************************************
 
 receivedXtnd
-    movf    temp4,W         ; Get received servo option selections
-    iorlw   ~XTNDMASK       ; Protect servo control flags other than options
-    andwf   srvCtrl,F       ; Clear deselected servo option flags
-    andlw   XTNDMASK        ; Isolate received servo option selections
-    iorwf   srvCtrl,F       ; Set servo option selections
+    movf    temp4,W         ; Get received extended travel selections
+    iorlw   ~XTNDMASK       ; Protect servo control flags other than extended travel
+    andwf   srvCtrl,F       ; Clear deselected extended travel flags
+    andlw   XTNDMASK        ; Isolate received extended travel selections
+    iorwf   srvCtrl,F       ; Set extended travel selections
 
-    goto    syncSrlRx       ; Loop looking for next command sequence
+    goto    receivedSetting
 
-    ; Actions for commands other than position or rate setting
+    ; Received set servo extended travel selections
+    ;******************************************************************
+
+receivedXtndOn
+    movf    temp4,W         ; Get received extended travel selections to set
+    andlw   XTNDMASK        ; Protect servo control flags other than extended travel
+    iorwf   srvCtrl,F       ; Set selected extended travel flags
+
+    goto    receivedSetting
+
+    ; Received clear servo extended travel selections
+    ;******************************************************************
+
+receivedXtndOff
+    comf    temp4,W         ; Get received extended travel selections to clear
+    iorlw   ~XTNDMASK       ; Protect servo control flags other than extended travel
+    andwf   srvCtrl,F       ; Clear deselected extended travel flags
+
+    goto    receivedSetting
+
+    ; Actions for commands other than position, rate, or travel setting
     ;******************************************************************
 
 receivedCommand
@@ -1722,16 +1756,16 @@ testForStore
     ;******************************************************************
 
     movlw   NUMSETTINGS
-    movwf   temp1           ; Set index of settings to write to EEPROM
+    movwf   temp1           ; Set number of settings to write to EEPROM
 
     movlw   ENDSETTINGS     ; Load end address of servo settings ...
     movwf   FSR             ; ... into indirect addressing register
 
 storeSetting
     movf    INDF,W          ; Get setting value ...
-    movwf   temp2           ; ... and save as EEPROM write value
+    movwf   temp2           ; ... as value to write to EEPROM
 
-    decf    temp1,W         ; Next EEPROM index
+    decf    temp1,W         ; Set index into EEPROM from count
     call    writeEEPROM
 
     decf    FSR,F           ; Decrement to address of next setting
@@ -1776,28 +1810,29 @@ loopDelay
 
 ;**********************************************************************
 ; Write to EEPROM subroutine                                          *
-;     Address in W                                                    *
+;     Address in W (index starting at zero)                           *
 ;     Value in temp2                                                  *
 ;**********************************************************************
 writeEEPROM
     BANKSEL EECON1          ; Ensure correct register page is selected
 waitWriteEE
-    btfsc   EECON1,WR       ; Skip if EEPROM write not 'in progress' ...
-    goto    waitWriteEE     ; ... else wait for write to complete
+    btfsc   EECON1,WR       ; Skip if EEPROM write not in progress ...
+    goto    waitWriteEE     ; ... else wait for previous write to complete
 
-    movwf   EEADR           ; Set address of EEPROM location to write
+    movwf   EEADR           ; Set address of EEPROM location to write to
     movf    temp2,W
-    movwf   EEDATA          ; Set EEPROM location value
+    movwf   EEDATA          ; Set value to write to EEPROM location
 
-    bsf     EECON1,WREN     ; Enable EEPROM writes
     bcf     INTCON,GIE      ; Disable interrupts
+    bsf     EECON1,WREN     ; Enable EEPROM writes
+
+    ; Unlock EEPROM write
     movlw   0x55
     movwf   EECON2
     movlw   0xAA
     movwf   EECON2
-    bsf     EECON1,WR       ; Set EEPROM write status, ...
-                            ; ... initiates hardware write cycle
-    bcf     EECON1,EEIF     ; Clear EE write complete interrupt flag
+
+    bsf     EECON1,WR       ; Trigger EEPROM hardware write cycle
     bcf     EECON1,WREN     ; Disable EEPROM writes
 
     bsf     INTCON,GIE      ; Enable interrupts
@@ -1807,19 +1842,19 @@ waitWriteEE
 
 ;**********************************************************************
 ; Read from EEPROM subroutine                                         *
-;     Address in W                                                    *
+;     Address in W (index starting at zero)                           *
 ;                                                                     *
 ;     Return value in W                                               *
 ;**********************************************************************
 readEEPROM
     BANKSEL EECON1          ; Ensure correct register page is selected
 waitReadEE
-    btfsc   EECON1,WR       ; Skip if EEPROM write not 'in progress' ...
-    goto    waitReadEE      ; ... else wait for write to complete
+    btfsc   EECON1,WR       ; Skip if EEPROM write not in progress ...
+    goto    waitReadEE      ; ... else wait for write to complete before attempting read
 
-    movwf   EEADR           ; Set address of EEPROM location to read
-    bsf     EECON1,RD       ; Set EEPROM read status
-    movf    EEDATA,W
+    movwf   EEADR           ; Set address of EEPROM location to read from
+    bsf     EECON1,RD       ; Trigger EEPROM read
+    movf    EEDATA,W        ; Read value from EEPROM location
 
     BANKSEL REGBANK0        ; Select register page 0
     return
@@ -1885,14 +1920,15 @@ scanServoInputs
     return                  ; ... else do nothing
 
     comf    INPORT,W        ; Read, inverted, physical input port
-    iorlw   ~INPMASK        ; Protect control bits other than inputs
+    iorlw   ~INPMASK        ; Protect, by setting, control non input bits
     andwf   srvCtrl,F       ; Clear inactive control input bits
-    andlw   INPMASK         ; Isolate control input bits read from port
-    iorwf   srvCtrl,F       ; Set active control input bits
+    andlw   INPMASK         ; Isolate control input bits read from port by clearing non input bits
+    iorwf   srvCtrl,W       ; Set active control input bits
 
-    movwf   temp2           ; Save new input values ...
+    movwf   srvCtrl         ; Save new input values and ...
+    movwf   temp2           ; ... write ...
     clrw                    ; ... to ...
-    goto    writeEEPROM     ; EEPROM
+    goto    writeEEPROM     ; ... EEPROM
 
 
 ;**********************************************************************
