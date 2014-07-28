@@ -180,8 +180,7 @@
 ;       synchronised same as for any setting value in order to ensure *
 ;       these are written to EEPROM on receipt of "store" command.    *
 ;       Corrected preservation of extended travel flags when changed  *
-;       control input bits written to EEPROM. Note - saved values are *
-;       overwritten with current values.                              *
+;       control input bits written to EEPROM.                         *
 ;       Added discrete commands to enable and disable extended travel *
 ;       per servo, as opposed to setting all in a single command.     *
 ;                                                                     *
@@ -1919,15 +1918,20 @@ scanServoInputs
     btfsc   STATUS,Z        ; Skip if inputs have changed ...
     return                  ; ... else do nothing
 
-    comf    INPORT,W        ; Read, inverted, physical input port
-    iorlw   ~INPMASK        ; Protect, by setting, control non input bits
-    andwf   srvCtrl,F       ; Clear inactive control input bits
-    andlw   INPMASK         ; Isolate control input bits read from port by clearing non input bits
-    iorwf   srvCtrl,W       ; Set active control input bits
+    clrw                    ; Read previous stored control bits ...
+    call    readEEPROM      ; ... from EEPROM ..
+    movwf   temp2           ; ... and save these
 
-    movwf   srvCtrl         ; Save new input values and ...
-    movwf   temp2           ; ... write ...
-    clrw                    ; ... to ...
+    movlw   ~INPMASK        ; Mask out ...
+    andwf   temp2,F         ; ... previous stored  control input bits
+    andwf   srvCtrl,F       ; ... current control input bits
+
+    comf    INPORT,W        ; Read, inverted, physical input port
+    andlw   INPMASK         ; Isolate control input bits read from port
+    iorwf   srvCtrl,F       ; Set current control input bits
+
+    iorwf   temp2,F         ; Write current control input and previous control non input bits ...
+    clrw                    ; ... back to ...
     goto    writeEEPROM     ; ... EEPROM
 
 
