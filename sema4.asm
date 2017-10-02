@@ -1,4 +1,4 @@
-    title    "$Id$"
+    title    "$sema4.asm - Gordon Hopkins Bouncer PCB port"
     list     p=16F630
     radix    dec
 
