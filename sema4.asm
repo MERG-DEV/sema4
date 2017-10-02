@@ -1,4 +1,4 @@
-   title    "$Id$"
+   title    "$sema4.asm - Sema4 variant"
     list     p=16F630
     radix    dec
 
