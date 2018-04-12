@@ -165,15 +165,7 @@
 ;    26 Aug 2013 - Chris White:                                       *
 ;       Reduced movement states from 32 to 8 as if bounce was used as *
 ;       an overshoot pause was noticeable between reaching end and    *
-;       starting "bounce" (overshoot).  			  * 
-;    14 April 2016 - Stephen Freeman                                  *
-;	Altered Setting Offset Table so that arm does not go to end   *
-;	position before bounce. You can then set the bounce points to *
-;       give a slight delay or hesitation before going to end point   *
-;       to simulate the signalman pausing for breathe before giving   *
-;       the lever another pull. Going the opposite way is unchanged.  *
-;       Depending on how you set the endpoints I think it may  work   *
-;       for both UQ and LQ. Only used it for LQ so far                *
+;       starting "bounce" (overshoot).                                *
 ;                                                                     *
 ;    27 Jul 2014 - Chris White:                                       *
 ;       Made change of extended travel flags mark EEPROM as not       *
@@ -183,6 +175,15 @@
 ;       control input bits written to EEPROM.                         *
 ;       Added discrete commands to enable and disable extended travel *
 ;       per servo, as opposed to setting all in a single command.     *
+;                                                                     *
+;    14 April 2016 - Stephen Freeman                                  *
+;       Altered Setting Offset Table so that arm does not go to end   *
+;       position before bounce. You can then set the bounce points to *
+;       give a slight delay or hesitation before going to end point   *
+;       to simulate the signalman pausing for breathe before giving   *
+;       the lever another pull. Going the opposite way is unchanged.  *
+;       Depending on how you set the endpoints I think it may  work   *
+;       for both UQ and LQ. Only used it for LQ so far                *
 ;                                                                     *
 ;**********************************************************************
 ;                                                                     *
@@ -516,7 +517,7 @@ portCval
 ; EEPROM initialisation                                               *
 ;**********************************************************************
 
-	ORG     EESTART         ; EEPROM data area
+  ORG     EESTART         ; EEPROM data area
 
 eeDataStart
 
@@ -1041,16 +1042,12 @@ getServoSettingOffset
 settingOffsetTable
     retlw   (srv1Off  - srv1OffRate) ; State 0, timeout drive shutoff
     retlw   (srv1Off  - srv1OffRate) ; State 1, final move back to end position
-retlw   (srv1Off  - srv1OffRate) ; State 1, final move back to end position    
-;retlw   (srv1Off3 - srv1OffRate) ; State 2, move to 3rd bounce
-    ;retlw   (srv1Off  - srv1OffRate) ; State 3, move back to end position
+    retlw   (srv1Off  - srv1OffRate) ; State 1, final move back to end position
     retlw   (srv1Off2 - srv1OffRate) ; State 4, move to 2nd bounce
-retlw   (srv1Off2 - srv1OffRate) ; State 4, move to 2nd bounce
-	;retlw   (srv1Off  - srv1OffRate) ; State 5, move back to end position
+    retlw   (srv1Off2 - srv1OffRate) ; State 4, move to 2nd bounce
     retlw   (srv1Off1 - srv1OffRate) ; State 6, move to 1st bounce
     retlw   (srv1Off1 - srv1OffRate) ; State 6, move to 1st bounce
     retlw   (srv1Off1 - srv1OffRate) ; State 6, move to 1st bounce
-	;retlw   (srv1Off  - srv1OffRate) ; State 7, intial move to end position
 
 #if (high settingOffsetTable) != (high $)
     error "Servo setting offset lookup table spans 8 bit boundary"
