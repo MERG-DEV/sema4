@@ -197,7 +197,7 @@
 
 #include <p16f630.inc>
 
-    __CONFIG   _CPD_OFF & _CP & _BODEN & _MCLRE_ON & _PWRTE_ON & _WDT_OFF & _INTRC_OSC_NOCLKOUT
+    __CONFIG   _CPD_OFF & _CP_OFF & _BODEN & _MCLRE_ON & _PWRTE_ON & _WDT_OFF & _INTRC_OSC_NOCLKOUT
 
 ; '__CONFIG' directive is used to embed configuration data within .asm file.
 ; The lables following the directive are located in the respective .inc file.
